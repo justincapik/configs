@@ -1,0 +1,45 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  config.vm.box = "kalilinux/rolling"
+
+  config.vm.provider "virtualbox" do |vb|
+    # Set a short, simple name for the VM
+
+    vb.memory = "4096"
+    vb.cpus = "8"
+
+    vb.name = "KaliLinuxRolling"
+  end
+
+  config.ssh.forward_agent = true
+
+  # adding ssh key and cloning configs git
+  config.vm.provision "shell", inline: <<-SHELL
+    # don't stop in case of error
+    set +e    
+
+    # Make sure ~/.ssh exists
+    mkdir -p /home/vagrant/.ssh
+    chown -R vagrant:vagrant /home/vagrant/.ssh
+
+    # Add GitHub to known_hosts to avoid "Host key verification" prompts
+    ssh-keyscan -H github.com >> /home/vagrant/.ssh/known_hosts
+    chown vagrant:vagrant /home/vagrant/.ssh/known_hosts
+    chmod 600 /home/vagrant/.ssh/known_hosts
+
+    # Clone as the vagrant user, ensuring it uses the forwarded SSH agent
+    if [ -d /home/vagrant/Desktop/configs ]; then
+      echo "configs already present. Skipping cloning.."
+    else
+      echo "Cloning configs..."
+      sudo -E -u vagrant -H git clone git@github.com:justincapik/configs.git /home/vagrant/Desktop/configs
+    fi
+  SHELL
+
+  # Shell provisioner to install packages
+  config.vm.provision "shell", path: "install.sh"
+
+end
+
