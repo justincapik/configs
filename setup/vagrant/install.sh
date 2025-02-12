@@ -46,8 +46,19 @@ done
 
 sudo apt autoremove -y
 
-#VS Code
-sudo apt-get install -y wget gpg apt-transport-https software-properties-common
-wget https://vscode.download.prss.microsoft.com/dbazure/download/stable/33fc5a94a3f99ebe7087e8fe79fbe1d37a251016/code_1.97.0-1738712383_arm64.deb -o /home/vagrant/Downloads/vscode.deb
-sudo apt-get install -y /home/vagrant/Downloads/vscode.deb
 
+
+#VS Code
+
+# Import Microsoft GPG key and add the repository
+curl -sSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /usr/share/keyrings/packages.microsoft.gpg > /dev/null
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" | sudo tee /etc/apt/sources.list.d/vscode.list
+
+# Update and install VSCode
+sudo apt-get update
+sudo apt-get install -y code
+
+# Install vscode extensions
+sudo -u vagrant -H code --install-extension vscodevim.vim
+sudo -u vagrant -H code --install-extension yzhang.markdown-all-in-one
+sudo -u vagrant -H code --install-extension tomoki1207.pdf
