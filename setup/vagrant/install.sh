@@ -35,6 +35,7 @@ PACKAGES=(
 	seclists
 	testssl.sh
 	vim
+	jq
 )
 
 # Install each package individually so we can continue if one fails
