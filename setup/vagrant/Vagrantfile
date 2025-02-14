@@ -54,7 +54,7 @@ Vagrant.configure("2") do |config|
 
   config.trigger.before :destroy do |trigger|
     trigger.name = "Git commit and push"
-    trigger.run = { inline: "cd /home/vagrant/Desktop/configs && git add . && git commit -m 'Auto commit before destroy' && git push" }
+    trigger.run = { inline: "bash -c cd /home/vagrant/Desktop/configs && git add . && git commit -m 'Auto commit before destroy' && git push" }
   end
 
 end
