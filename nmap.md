@@ -1,5 +1,76 @@
 # nmap
 
+## Host Discovery
+
+Finding out who's around.
+
+#### Scan Network Range
+```bash
+$> sudo nmap 10.129.2.0/24 -sn -oA tnet | grep for | cut -d" " -f5
+
+10.129.2.4
+10.129.2.10
+10.129.2.11
+10.129.2.18
+10.129.2.19
+10.129.2.20
+10.129.2.28
+```
+
+- `10.129.2.0/24` &rarr; Target network range.
+- `-sn` &rarr; Disables port scanning.
+- `-oA tnet` &rarr; Stores the results in all formats starting with the name 'tnet'.
+
+note: Gives a file of list of IPs to scan to add to nmap later on (`-iL file`).
+
+#### ip scan format
+
+single: `sudo nmap 10.129.2.18 -sn -oA host `
+
+multiple: `sudo nmap -sn -oA tnet 10.129.2.18 10.129.2.19 10.129.2.20`
+
+mutliple (range): `sudo nmap -sn -oA tnet 10.129.2.18-20`
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 example simple output:
 
 ```
