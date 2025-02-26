@@ -152,7 +152,7 @@ Back to our directory brute-forcing:
 - `301` is permanent redirect.
 
 Let's walk around:
-![alt text](images/image.png)
+![alt text](example_box_dir.png)
 
 In `nibbleblog/content` we find `public`, `private`, and `tmp`, and after digging we find `users.xml`:
 

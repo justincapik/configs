@@ -1,0 +1,194 @@
+# nmap
+
+## Host Discovery
+
+Finding out who's around.
+
+### Scan Network Range
+```bash
+$> sudo nmap 10.129.2.0/24 -sn -oA tnet | grep for | cut -d" " -f5
+
+10.129.2.4
+10.129.2.10
+10.129.2.11
+10.129.2.18
+10.129.2.19
+10.129.2.20
+10.129.2.28
+```
+
+- `10.129.2.0/24` &rarr; Target network range.
+- `-sn` &rarr; Disables port scanning.
+- `-oA tnet` &rarr; Stores the results in all formats starting with the name 'tnet'.
+
+note: Gives a file of list of IPs to scan to add to nmap later on (`-iL file`).
+
+### Ip scan format
+
+single: `sudo nmap 10.129.2.18 -sn -oA host `
+
+multiple: `sudo nmap -sn -oA tnet 10.129.2.18 10.129.2.19 10.129.2.20`
+
+mutliple (range): `sudo nmap -sn -oA tnet 10.129.2.18-20`
+
+### Still alive pings
+
+If we disable port scan (`-sn`) and in many other cases, nmap will automatically ping scan with `ICMP Echo Requests` (`-PE`). If available though namp will `ARP ping`. We can check this with `--packet-trace`. we can disable the `arp ping` with `--disable-arp-ping`.
+
+## Host and port scanning
+
+### Default behavior
+
+default nmap scan:
+- if root: `-sS` &rarr; SYN scan, if not root: `-sT` &rarr; TCP scan
+- top 1000 Tcp porst (statistically)
+- `--max-retries` &rarr; 10
+ 
+note: `-sS` and `-sT` options are similar, but `-sS` only send a `TCP SYN` and waits for a `TCP SYN/ACK` or `TCP RST`, whereas `-sT` uses the system `connect()` function. This function establishes a full TCP connection, which is more likely to be logged on a target system. Advanced IDS/IPS systems have evolved to detect the more suble techniques like SYN scan.
+
+Top 100 ports can be selected with option `-F`, and top n ports with `--top-ports=n`.
+
+### Packet tracing
+
+```bash
+$> sudo nmap 10.129.2.28 -p 21 --packet-trace -Pn -n --disable-arp-ping
+
+Starting Nmap 7.80 ( https://nmap.org ) at 2020-06-15 15:39 CEST
+SENT (0.0429s) TCP 10.10.14.2:63090 > 10.129.2.28:21 S ttl=56 id=57322 iplen=44  seq=1699105818 win=1024 <mss 1460>
+RCVD (0.0573s) TCP 10.129.2.28:21 > 10.10.14.2:63090 RA ttl=64 id=0 iplen=40  seq=0 win=0
+Nmap scan report for 10.11.1.28
+Host is up (0.014s latency).
+
+PORT   STATE  SERVICE
+21/tcp closed ftp
+MAC Address: DE:AD:00:00:BE:EF (Intel Corporate)
+
+Nmap done: 1 IP address (1 host up) scanned in 0.07 seconds
+```
+
+- `--packet-trace` &rarr; Shows all packets sent and received.
+- `-Pn` &rarr; Disables ICMP Echo request.
+- `-n` &rarr; Disables DNS resolution.
+- `--disable-arp-ping` &rarr; Disables ARP ping.
+
+#### How to read packet tracing
+
+Request:
+
+`SENT (0.0429s)` &rarr; Indicates the SENT operation of Nmap, which sends a packet to the target.
+
+`TCP` &rarr; Shows the protocol that is being used to interact with the target port.
+
+`10.10.14.2:63090 >` &rarr; Represents our IPv4 address and the source port, which will be used by Nmap to send the packets.
+
+`10.129.2.28:21` &rarr; Shows the target IPv4 address and the target port.
+
+`S` &rarr; SYN flag of the sent TCP packet.
+
+`ttl=56 id=57322 iplen=44 seq=1699105818 win=1024 mss 1460` &rarr; Additional TCP Header parameters.
+
+Response:
+
+`RCVD (0.0573s)`	Indicates a received packet from the target.
+
+`TCP` &rarr; Shows the protocol that is being used.
+
+`10.129.2.28:21 >` &rarr; Represents targets IPv4 address and the source port, which will be used to reply.
+
+`10.10.14.2:63090` &rarr; Shows our IPv4 address and the port that will be replied to.
+
+`RA` &rarr; RST and ACK flags of the sent TCP packet.
+
+`ttl=64 id=0 iplen=40 seq=0 win=0` &rarr; Additional TCP Header parameters.
+
+
+### UDP scan   
+
+Some system administrators sometimes forget to filter the UDP ports in addition to the TCP ones. Since UDP is a stateless protocol and does not require a three-way handshake like TCP. We do not receive any acknowledgment. Consequently, the timeout is much longer, making the whole UDP scan (-sU) much slower than the TCP scan (-sS).Some.
+
+By default nmap sends empty datagrams so we do not receive any response.
+
+- any response &rarr; `open` (uncommon, service must be configured for this)
+- ICMP err 3 (port unreachable) &rarr; `closed`
+- any other ICMP &rarr; `open|filtered`
+
+### Version scan
+
+use `-sV`. Much less stealthy because it sends many probes.
+
+### Saving results
+
+- Normal output (`-oN`) with the `.nmap` file extension
+- Grepable output (`-oG`) with the `.gnmap` file extension
+- XML output (`-oX`) with the `.xml` file extension
+- All (`-oA`)
+
+XML gives an easily readable format, even for non-technical people:
+`xsltproc target.xml -o target.html`
+
+![xml output](./nmap-report.png)
+
+### Service Enumeration
+
+`-sV` to perform service detection. Often better to run a simple scan first to have some information in case we get banned.
+
+note: press `[Space Bar]` during a long scan to show a scan status. we can also add the option `--stats-every=5s` for this update every 5 seconds for example.
+
+by default nmap tries to look at the banners of the scanned ports. if it cannot identify versions through the banners, it attemps to identify the with signature based-matching (slower and cases might not be handled).
+
+## Nmap script engine
+
+- `auth` &rarr; Determination of authentication credentials.
+- `broadcast` &rarr; Scripts, which are used for host discovery by broadcasting and the discovered hosts, can be automatically added to the remaining scans.
+- `brute` &rarr; Executes scripts that try to log in to the respective service by brute-forcing with credentials.
+- `default` &rarr; Default scripts executed by using the -sC option.
+- `discovery` &rarr; Evaluation of accessible services.
+- `dos` &rarr; These scripts are used to check services for denial of service vulnerabilities and are used less as it harms the services.
+- `exploit` &rarr; This category of scripts tries to exploit known vulnerabilities for the scanned port.
+- `external` &rarr; Scripts that use external services for further processing.
+- `fuzzer` &rarr; This uses scripts to identify vulnerabilities and unexpected packet handling by sending different fields, which can take much time.
+- `intrusive` &rarr; Intrusive scripts that could negatively affect the target system.
+- `malware` &rarr; Checks if some malware infects the target system.
+- `safe` &rarr; Defensive scripts that do not perform intrusive and destructive access.
+- `version` &rarr; Extension for service detection.
+- `vuln` &rarr; Identification of specific vulnerabilities.
+
+#### How to run
+
+`sudo nmap <target> -sC` for default script.
+
+`sudo nmap <target> --script <category>` for specific category.
+
+`sudo nmap <target> --script <script-name>,<script-name>,...` for defined scripts.
+
+for example:
+
+```bash
+$> sudo nmap 10.129.2.28 -p 25 --script banner,smtp-commands
+
+Starting Nmap 7.80 ( https://nmap.org ) at 2020-06-16 23:21 CEST
+Nmap scan report for 10.129.2.28
+Host is up (0.050s latency).
+
+PORT   STATE SERVICE
+25/tcp open  smtp
+|_banner: 220 inlane ESMTP Postfix (Ubuntu)
+|_smtp-commands: inlane, PIPELINING, SIZE 10240000, VRFY, ETRN, STARTTLS, ENHANCEDSTATUSCODES, 8BITMIME, DSN, SMTPUTF8,
+MAC Address: DE:AD:00:00:BE:EF (Intel Corporate)
+```
+
+#### Aggressive scan
+
+
+use `-A`.  This scans the target with multiple options as service detection (`-sV`), OS detection (`-O`), traceroute (`--traceroute`), and with the default NSE scripts (`-sC`).
+
+## Performance
+
+We can use various options to tell Nmap how fast (`-T <0-5>`), with which frequency (`--min-parallelism <number>`), which timeouts (`--max-rtt-timeout <time>`) the test packets should have, how many packets should be sent simultaneously (`--min-rate <number>`), and with the number of retries (`--max-retries <number>`) for the scanned ports the targets should be scanned.
+
+## Firewall and IDS/IPS Evasion
+
+Firewall security systems are based on a software component that monitors network traffic between the firewall and incoming data connections and decides how to handle the connection based on the rules that have been set.
+
+
+
