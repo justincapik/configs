@@ -190,5 +190,66 @@ We can use various options to tell Nmap how fast (`-T <0-5>`), with which freque
 
 Firewall security systems are based on a software component that monitors network traffic between the firewall and incoming data connections and decides how to handle the connection based on the rules that have been set.
 
+### IDS/IPS
 
+`IDS` (Intrusion detection system) and `IPS` (Intrusion prevention system) are both software-based components. IDS scans the network for potential attacks, analyzes them, and reports any detected attacks. IPS complements IDS by taking specific defensive measures if a potential attack should have been detected. The analysis of such attacks is based on pattern matching and signatures. If specific patterns are detected, such as a service detection scan, IPS may prevent the pending connection attempts.
+
+`filtered` or `unfiltered` ports can show up differently base on different types of scans. eg:
+- `-sS` (SYN scan) &rarr;  `22/tcp open     ssh` &rarr; reveived `SYN-ACK` packet
+- `-sA` (TCP ACK scan) &rarr; `22/tcp unfiltered ssh` &rarr; received `RST` packet
+
+Nmap's `-sA` method is much harder to filter for firewalls and IDS/IPS systems than regular `-sS` or `-sT` because they only send a TCP packet with only the ACK flag. When a port is closed or open, the host must respond with an `RST` flag. Unlike outgoing connections, all connection attempts (with the `SYN` flag) from external networks are usually blocked by firewalls. However, the packets with the `ACK` flag are often passed by the firewall because the firewall cannot determine whether the connection was first established from the external network or the internal network.
+
+### Detecting IDS/IPS
+
+`IDS` monitors all connections between hosts and may notify an administrator.
+
+`IPS` takes measures configured by an administrator independently to prevent potential attacks automatically.
+
+Having a few different `VPS` with different Ip addresse is recommended in case an IP gets banned. This is the first step and an administrator may take to stop an attack. Our `ISP` will be contacted and blocked from all access to the internet.
+
+One method to detect if they is such a system is to scan from a single `VPS`. If at any time the host is blocked and has no access to the target, we know the administrators have taken some sort of secuirty measures. We will know to be quieter in our scans, and in the best case, disguise all interaction with the target network and its services.
+
+### Spoofing IPs
+
+we can also scan using decoys with the option `-D`. Set `RND` to a specific number to generate a certain amount of IP addresses.
+```bash
+$> sudo nmap 10.129.2.28 -p 80 -sS -Pn -n --disable-arp-ping --packet-trace -D RND:5
+
+Starting Nmap 7.80 ( https://nmap.org ) at 2020-06-21 16:14 CEST
+SENT (0.0378s) TCP 102.52.161.59:59289 > 10.129.2.28:80 S ttl=42 ... 
+SENT (0.0378s) TCP 10.10.14.2:59289 > 10.129.2.28:80 S ttl=59 ...
+SENT (0.0379s) TCP 210.120.38.29:59289 > 10.129.2.28:80 S ttl=37 ...
+SENT (0.0379s) TCP 191.6.64.171:59289 > 10.129.2.28:80 S ttl=38 ...
+SENT (0.0379s) TCP 184.178.194.209:59289 > 10.129.2.28:80 S ttl=39 ...
+SENT (0.0379s) TCP 43.21.121.33:59289 > 10.129.2.28:80 S ttl=55 ...
+RCVD (0.1370s) TCP 10.129.2.28:80 > 10.10.14.2:59289 SA ttl=64 ...
+Nmap scan report for 10.129.2.28
+Host is up (0.099s latency).
+
+PORT   STATE SERVICE
+80/tcp open  http
+MAC Address: DE:AD:00:00:BE:EF (Intel Corporate)
+
+Nmap done: 1 IP address (1 host up) scanned in 0.15 seconds
+```
+
+note: Spoofed packets may be filteres by ISPs and routers.
+
+We can also spoof our IP with the `-S <IP>` option.
+
+### DNS Proxying
+
+We can give our preferred dns server with `--dsn-server <ns>,<ns>`. Sometimes used when a company DNS server is more trusted than those on the internet.
+
+By default port `53` is allocated for DNS resolution unless specified otherwise. Some administrators do no filter IDS/IPS properly and we can pretend to come from this port to be trusted and pass through with `--source-port <port>`.
+
+If indeed port `53` is accepted, it is very likely that IDS/IPS filter might also be configured much weaker than other. We can test this by trying to connect to this port by using `netcat`.
+```bash
+$> ncat -nv --source-port 53 10.129.2.28 50000
+
+Ncat: Version 7.80 ( https://nmap.org/ncat )
+Ncat: Connected to 10.129.2.28:50000.
+220 ProFTPd
+```
 
