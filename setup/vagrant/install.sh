@@ -36,6 +36,8 @@ PACKAGES=(
 	testssl.sh
 	vim
 	jq
+	freerdp2-x11
+	ncat
 )
 
 # Install each package individually so we can continue if one fails
