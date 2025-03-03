@@ -38,6 +38,7 @@ PACKAGES=(
 	jq
 	freerdp2-x11
 	ncat
+	htop
 )
 
 # Install each package individually so we can continue if one fails
