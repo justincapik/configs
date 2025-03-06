@@ -120,7 +120,7 @@ Configure folder Share Permissions:
 
 The `ACL` (Access Control List) is similar to `NTFS`. Admins use the `ACL`'s `ACEs` (Access Controle Entries) seen above to comfigure `users` and `groups` (aka security principals) to manage and track access to shared ressources.
 
-we can connect to the machine via SMB:
+we can list the available shares via SMB:
 ```
 $ smbclient -L SERVER_IP -U htb-student
 Enter WORKGROUP\htb-student's password: 
@@ -133,7 +133,7 @@ Enter WORKGROUP\htb-student's password:
 	IPC$            IPC       Remote IPC
 ```
 
-or connect directly to the available file with:
+and connect directly to the available share with:
 ```
 $ smbclient '\\SERVER_IP\Company Data' -U htb-student
 Password for [WORKGROUP\htb-student]:
@@ -141,3 +141,16 @@ Try "help" to get a list of possible commands.
 
 smb: \> 
 ```
+
+Here's what could block us from doing that:
+
+## Windows Defender Firewall
+
+the freiwall may block linux-based connections as we are not in the same `workgroup`. if a Windows system is part of a `workgroup`, all `netlogon` requests are authenticated against the system's `SAM` database. 
+
+Systems can also be part of a `Windows Domain`, in which case they use `Active Directory` to process authentification requests.
+
+A workgroup in a `SAM` is hosted **locally**, while a `Windows Domain` involves a centralized network-based database (`Active Directory`).
+
+In a `SAM` setup, the workgroups are seperate from the firewall, and though the firewall may request users or workgroups from the `SAM` they are independant. In a `Windows Domain` setting these can be joined and configured in a `Group Policy`. Additionally to either of these modules NTFS have it's own Permissions ACL (Access Control List) configuration (By default inherited from parent directory, most spear-phishing attacks are directed towards system administrators for this reason).
+
