@@ -36,7 +36,7 @@ PACKAGES=(
 	testssl.sh
 	vim
 	jq
-	freerdp2-x11
+	freerdp3-x11
 	ncat
 	htop
 )
