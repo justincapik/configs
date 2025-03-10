@@ -154,3 +154,197 @@ A workgroup in a `SAM` is hosted **locally**, while a `Windows Domain` involves 
 
 In a `SAM` setup, the workgroups are seperate from the firewall, and though the firewall may request users or workgroups from the `SAM` they are independant. In a `Windows Domain` setting these can be joined and configured in a `Group Policy`. Additionally to either of these modules NTFS have it's own Permissions ACL (Access Control List) configuration (By default inherited from parent directory, most spear-phishing attacks are directed towards system administrators for this reason).
 
+---
+---
+
+# Only sctrict necessary from this point on
+
+mount to SMB Share:
+```bash
+jucapik42@htb[/htb]$ sudo mount -t cifs -o username=htb-student,password=Academy_WinFun! //ipaddoftarget/"Company Data" /home/user/Desktop/
+```
+
+makes:
+```
+net share
+
+Share name   Resource                        Remark
+
+-------------------------------------------------------------------------------
+C$           C:\                             Default share
+IPC$                                         Remote IPC
+ADMIN$       C:\WINDOWS                      Remote Admin
+Company Data C:\Users\htb-student\Desktop\Company Data
+
+The command completed successfully.
+```
+
+View Share accces logs in `Event Viewer`.
+
+---
+
+Query `Service Control Manager` system:
+```PowerShell
+PS C:\htb> Get-Service | ? {$_.Status -eq "Running"} | select -First 2 |fl
+
+
+Name                : AdobeARMservice
+DisplayName         : Adobe Acrobat Update Service
+Status              : Running
+DependentServices   : {}
+ServicesDependedOn  : {}
+CanPauseAndContinue : False
+CanShutdown         : False
+CanStop             : True
+ServiceType         : Win32OwnProcess
+
+Name                : Appinfo
+DisplayName         : Application Information
+Status              : Running
+DependentServices   : {}
+ServicesDependedOn  : {RpcSs, ProfSvc}
+CanPauseAndContinue : False
+CanShutdown         : False
+CanStop             : True
+ServiceType         : Win32OwnProcess, Win32ShareProcess
+```
+
+[Windows components list](https://en.wikipedia.org/wiki/List_of_Microsoft_Windows_components#Services)
+
+---
+
+examine service with:
+```
+C:\Users\htb-student>sc qc wuauserv
+[SC] QueryServiceConfig SUCCESS
+
+SERVICE_NAME: wuauserv
+        TYPE               : 20  WIN32_SHARE_PROCESS
+        START_TYPE         : 3   DEMAND_START
+        ERROR_CONTROL      : 1   NORMAL
+        BINARY_PATH_NAME   : C:\WINDOWS\system32\svchost.exe -k netsvcs -p
+        LOAD_ORDER_GROUP   :
+        TAG                : 0
+        DISPLAY_NAME       : Windows Update
+        DEPENDENCIES       : rpcss
+        SERVICE_START_NAME : LocalSystem
+```
+
+query from a box:
+```
+C:\Users\htb-student>sc //hostname or ip of box query ServiceName
+```
+
+Can also be used to stop/start services with `sc stop servicename`.
+If unsufficient priviledges can run:
+```
+C:\WINDOWS\system32> sc config wuauserv binPath=C:\Winbows\Perfectlylegitprogram.exe
+
+[SC] ChangeServiceConfig SUCCESS
+
+C:\WINDOWS\system32> sc qc wuauserv
+
+[SC] QueryServiceConfig SUCCESS
+
+SERVICE_NAME: wuauserv
+        TYPE               : 20  WIN32_SHARE_PROCESS
+        START_TYPE         : 3   DEMAND_START
+        ERROR_CONTROL      : 1   NORMAL
+        BINARY_PATH_NAME   : C:\Winbows\Perfectlylegitprogram.exe
+        LOAD_ORDER_GROUP   :
+        TAG                : 0
+        DISPLAY_NAME       : Windows Update
+        DEPENDENCIES       : rpcss
+        SERVICE_START_NAME : LocalSystem
+```
+
+
+get gibberish permissions info with:
+```
+C:\WINDOWS\system32> sc sdshow wuauserv
+
+D:(A;;CCLCSWRPLORC;;;AU)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;SY)S:(AU;FA;CCDCLCSWRPWPDTLOSDRCWDWO;;;WD)
+```
+
+Ref for string `D: (A;;CCLCSWRPLORC;;;AU)`:
+
+    D: - the proceeding characters are DACL permissions
+    AU: - defines the security principal Authenticated Users
+    A;; - access is allowed
+    CC - SERVICE_QUERY_CONFIG is the full name, and it is a query to the service control manager (SCM) for the service configuration
+    LC - SERVICE_QUERY_STATUS is the full name, and it is a query to the service control manager (SCM) for the current status of the service
+    SW - SERVICE_ENUMERATE_DEPENDENTS is the full name, and it will enumerate a list of dependent services
+    RP - SERVICE_START is the full name, and it will start the service
+    LO - SERVICE_INTERROGATE is the full name, and it will query the service for its current status
+    RC - READ_CONTROL is the full name, and it will query the security descriptor of the service
+
+Get full permission info with:
+```
+PS C:\Users\htb-student> Get-ACL -Path HKLM:\System\CurrentControlSet\Services\wuauserv | Format-List
+
+Path   : Microsoft.PowerShell.Core\Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Services\wuauserv
+Owner  : NT AUTHORITY\SYSTEM
+Group  : NT AUTHORITY\SYSTEM
+Access : BUILTIN\Users Allow  ReadKey
+         BUILTIN\Users Allow  -2147483648
+         BUILTIN\Administrators Allow  FullControl
+         BUILTIN\Administrators Allow  268435456
+         NT AUTHORITY\SYSTEM Allow  FullControl
+         NT AUTHORITY\SYSTEM Allow  268435456
+         CREATOR OWNER Allow  268435456
+         APPLICATION PACKAGE AUTHORITY\ALL APPLICATION PACKAGES Allow  ReadKey
+         APPLICATION PACKAGE AUTHORITY\ALL APPLICATION PACKAGES Allow  -2147483648
+         S-1-15-3-1024-1065365936-1281604716-3511738428-1654721687-432734479-3232135806-4053264122-3456934681 Allow
+         ReadKey
+         S-1-15-3-1024-1065365936-1281604716-3511738428-1654721687-432734479-3232135806-4053264122-3456934681 Allow
+         -2147483648
+Audit  :
+Sddl   : O:SYG:SYD:AI(A;ID;KR;;;BU)(A;CIIOID;GR;;;BU)(A;ID;KA;;;BA)(A;CIIOID;GA;;;BA)(A;ID;KA;;;SY)(A;CIIOID;GA;;;SY)(A
+         ;CIIOID;GA;;;CO)(A;ID;KR;;;AC)(A;CIIOID;GR;;;AC)(A;ID;KR;;;S-1-15-3-1024-1065365936-1281604716-3511738428-1654
+         721687-432734479-3232135806-4053264122-3456934681)(A;CIIOID;GR;;;S-1-15-3-1024-1065365936-1281604716-351173842
+         8-1654721687-432734479-3232135806-4053264122-3456934681)
+```
+
+---
+
+Non-interactive accounts:
+
+- Local System Account &rarr; Also known as the NT AUTHORITY\SYSTEM account, this is the most powerful account in Windows systems. It is used for a variety of OS-related tasks, such as starting Windows services. This account is more powerful than accounts in the local administrators group.
+- Local Service Account &rarr; Known as the NT AUTHORITY\LocalService account, this is a less privileged version of the SYSTEM account and has similar privileges to a local user account. It is granted limited functionality and can start some services.
+- Network Service Account &rarr; This is known as the NT AUTHORITY\NetworkService account and is similar to a standard domain user account. It has similar privileges to the Local Service Account on the local machine. It can establish authenticated sessions for certain network services.
+
+---
+
+for cmd terminal:
+
+`help`
+
+`help commandname`
+
+`command /?`
+
+for PowerShell:
+
+`get-alias` for cmdlets
+
+`help`
+
+`Get-Help command`
+
+import script command with `Import-Module .\PowerView.ps1` for example
+
+`Get-ExecutionPolicy -List`
+
+Almost anyone can change their execution policy with `Set-ExecutionPolicy Bypass -Scope Process` for example or running a script in the shell. Execution Policy is not a strong protection.
+
+execution policy possibilities:
+
+- AllSigned &rarr; All scripts can run, but a trusted publisher must sign scripts and configuration files. This includes both remote and local scripts. We receive a prompt before running scripts signed by publishers that we have not yet listed as either trusted or untrusted.
+- Bypass &rarr; No scripts or configuration files are blocked, and the user receives no warnings or prompts.
+- Default &rarr; This sets the default execution policy, Restricted for Windows desktop machines and RemoteSigned for Windows servers.
+- RemoteSigned &rarr; Scripts can run but requires a digital signature on scripts that are downloaded from the internet. Digital signatures are not required for scripts that are written locally.
+- Restricted &rarr; This allows individual commands but does not allow scripts to be run. All script file types, including configuration files (.ps1xml), module script files (.psm1), and PowerShell profiles (.ps1) are blocked.
+- Undefined &rarr; No execution policy is set for the current scope. If the execution policy for ALL scopes is set to undefined, then the default execution policy of Restricted will be used.
+- Unrestricted &rarr; This is the default execution policy for non-Windows computers, and it cannot be changed. This policy allows for unsigned scripts to be run but warns the user before running scripts that are not from the local intranet zone.
+
+---
