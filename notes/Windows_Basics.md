@@ -348,3 +348,96 @@ execution policy possibilities:
 - Unrestricted &rarr; This is the default execution policy for non-Windows computers, and it cannot be changed. This policy allows for unsigned scripts to be run but warns the user before running scripts that are not from the local intranet zone.
 
 ---
+
+
+#### WMI (Windows Management Instrumentation):
+- Status information for local/remote systems
+- Configuring security settings on remote machines/applications
+- Setting and changing user and group permissions
+- Setting/modifying system properties
+- Code execution
+- Scheduling processes
+- Setting up logging
+
+```
+PS C:\Users\htb-student> Get-WmiObject -Class Win32_OperatingSystem
+
+
+SystemDirectory : C:\WINDOWS\system32
+Organization    :
+BuildNumber     : 19041
+RegisteredUser  : mrb3n
+SerialNumber    : 00329-10280-00000-AA938
+Version         : 10.0.19041
+```
+```
+PS C:\htb> Get-WmiObject -Class Win32_OperatingSystem | select SystemDirectory,BuildNumber,SerialNumber,Version | ft
+
+SystemDirectory     BuildNumber SerialNumber            Version
+---------------     ----------- ------------            -------
+C:\Windows\system32 19041       00123-00123-00123-AAOEM 10.0.19041
+```
+```
+
+PS C:\Users\htb-student> Get-WmiObject Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true }
+>>
+
+
+DHCPEnabled      : True
+IPAddress        : {10.129.117.117, fe80::dd29:d732:6690:3143, dead:beef::50bc:ee20:7032:86c9, dead:beef::dd29:d732:6690:3143}
+DefaultIPGateway : {10.129.0.1, fe80::250:56ff:fe94:7ff4}
+DNSDomain        : .htb
+ServiceName      : vmxnet3ndis6
+Description      : vmxnet3 Ethernet Adapter
+Index            : 2
+```
+
+Invoke WMI (renaming a file):
+```
+PS C:\htb> Invoke-WmiMethod -Path "CIM_DataFile.Name='C:\users\public\spns.csv'" -Name Rename -ArgumentList "C:\Users\Public\kerberoasted_users.csv"
+
+
+__GENUS          : 2
+__CLASS          : __PARAMETERS
+__SUPERCLASS     :
+__DYNASTY        : __PARAMETERS
+__RELPATH        :
+__PROPERTY_COUNT : 1
+__DERIVATION     : {}
+__SERVER         :
+__NAMESPACE      :
+__PATH           :
+ReturnValue      : 0
+PSComputerName   :
+```
+
+---
+
+MMC (Microsoft Management Console)
+
+The MMC can be used to group snap-ins, or administrative tools, to manage hardware, software, and network components within a Windows host. Runs on all Windows versions.
+
+`mmc` command to open.
+
+Add custom MMC tool:
+![alt text](./MMC_add_remove.png)
+
+These can be saved with `File`->`Save` and loaded later.
+
+---
+
+WSL (Windows Subsystem for Linux)
+
+Invented to get `sed`,`awk`,`grep`, etc. on linux systems. Install with (as admin):
+`Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux`.
+
+Looks like true linux command output, not just alias like PowerShell.
+```
+PS C:\htb> uname -a
+
+Linux WS01 4.4.0-18362-Microsoft #476-Microsoft Frit Nov 01 16:53:00
+PST 2019 x86_64 x86 _64 x86_64 GNU/Linux
+```
+
+---
+
