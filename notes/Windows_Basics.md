@@ -441,3 +441,123 @@ PST 2019 x86_64 x86 _64 x86_64 GNU/Linux
 
 ---
 
+Windows Server Core (WSC) is the terminal only version of the OS.
+
+---
+
+## Windows Security
+
+Each individual Security Identifier (SID) is pbroken down into:
+
+`(SID)-(revision level)-(identifier-authority)-(subauthority1)-(subauthority2)-(etc)`
+
+=>
+
+```PowerShell
+PS C:\htb> whoami /user
+
+USER INFORMATION
+----------------
+
+User Name           SID
+=================== =============================================
+ws01\bob S-1-5-21-674899381-4069889467-2080702030-1002
+```
+
+| Number | Meaning | Description |
+| -- | -- | -- |
+| S | SID | Identifies the string as a SID.|
+| 1 | Revision Level | To date, this has never changed and has always been 1.|
+| 5 | Identifier-authority | A 48-bit string that identifies the authority (the computer or network) that created the SID.|
+| 21 | Subauthority1 | This is a variable number that identifies the user's relation or group described by the SID to the authority that created it. It tells us in what order this authority created the user's account.|
+| 674899381-4069889467-2080702030 | Subauthority2 | Tells us which computer (or domain) created the number|
+| 1002 | Subauthority3 | The RID that distinguishes one account from another. Tells us whether this user is a normal user, a guest, an administrator, or part of some other group
+
+`SAM` (Security Accounts Manager) grants right to a network to execute specific processes.
+
+The rights are are manager by `ACE` (Access Control Entries) in the `ACL` (Access Control Lists) (deinf users, groups and process permissions eg).
+
+Two types of `ACL`s:
+- `DACL` (Discretionary Access Control List): read/write/execute.. permissions
+- `SACL` (System Access Control List): what should be logged (deletion, creation..)
+
+`LSA` (Local Security Authority) is tasked with giving `access tokens` for each process/thread (someone logs in). It is composed of:
+- `SID`
+- `Group memberships` &rarr; which group it belongs to
+- `Privileges` &rarr; right specific to situations (eg: *SeDebugPrivilege*)
+- `Integrity Level` &rarr; security clearance level (Low, Medium, High, System)
+
+
+`UAC` (User Account Control) exists to prevent malware from running. It's the pop up window when a process is running with elevated privileges. [Here](https://learn.microsoft.com/en-us/windows/security/application-security/application-control/user-account-control/how-it-works)'s how it checks for that:
+
+![alt text](./uacarchitecture1.png)
+
+#### Registry
+
+`Registry` is a database for low-level permissions. It sorts by computer an user.
+
+Use `regedit` to open it. File structure:
+
+| Hive | Description | Example Use|
+| -- | -- | -- |
+|HKEY_CLASSES_ROOT (HKCR) | Stores file associations and COM objects. | Defines which program opens .txt files.|
+|HKEY_CURRENT_USER (HKCU) | Stores settings for the current user. | User’s wallpaper, desktop icons.|
+|HKEY_LOCAL_MACHINE (HKLM) | Stores system-wide settings. | Installed programs, drivers, Windows settings.|
+|HKEY_USERS (HKU) | Stores settings for all users. | User-specific configurations.|
+|HKEY_CURRENT_CONFIG (HKCC) | Stores information about the current hardware profile. | Active display and printer settings. |
+
+The Registry is stored through different files in the system:
+- `HKEY_LOCAL_MACHINE` (aka `HKLM`) &rarr; `C:\Windows\system32\config`
+- User specific registry hive (`HKCU`) &rarr; `C:\Users\<USERNAME>\Ntuser.dat`
+- ...
+
+`HKEY` defines the root folder. Each file type is defined by a `REG_...` [value](https://learn.microsoft.com/en-us/windows/win32/sysinfo/registry-value-types). These values can be SID, strings, paths, hex values... :
+
+|Value | Type|
+| --   |  -- |
+|REG_BINARY | Binary data in any form.|
+|REG_DWORD | A 32-bit number.|
+|REG_DWORD_LITTLE_ENDIAN | A 32-bit number in little-endian format. Windows is designed to run on little-endian computer architectures. Therefore, this value is defined as REG_DWORD in the Windows header files.|
+|REG_DWORD_BIG_ENDIAN | A 32-bit number in big-endian format. Some UNIX systems support big-endian architectures.|
+|REG_EXPAND_SZ | A null-terminated string that contains unexpanded references to environment variables (for example, "%PATH%"). It will be a Unicode or ANSI string depending on whether you use the Unicode or ANSI functions. To expand the environment variable references, use the ExpandEnvironmentStrings function.|
+|REG_LINK | A null-terminated Unicode string containing the target path of a symbolic link created by calling the RegCreateKeyEx function with REG_OPTION_CREATE_LINK.|
+|REG_MULTI_SZ | A sequence of null-terminated strings, terminated by an empty string (\0). The following is an example: String1\0String2\0String3\0LastString\0\0 The first \0 terminates the first string, the second to the last \0 terminates the last string, and the final \0 terminates the sequence. Note that the final terminator must be factored into the length of the string.|
+|REG_NONE | No defined value type.|
+|REG_QWORD | A 64-bit number.|
+|REG_QWORD_LITTLE_ENDIAN | A 64-bit number in little-endian format. Windows is designed to run on little-endian computer architectures. Therefore, this value is defined as REG_QWORD in the Windows header files.|
+|REG_SZ | A null-terminated string. This will be either a Unicode or an ANSI string, depending on whether you use the Unicode or ANSI functions.
+
+Startup program are in the Run and RunOne registries, aka:
+```
+HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\Run
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run
+HKEY_LOCAL_MACHINE\Software\Microsoft\Windows\CurrentVersion\RunOnce
+HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\RunOnce
+```
+and can be queried with `reg query \path\to\registry\`.
+
+#### Application Whitelisting/Backlisting
+
+Whitelisting assumes "zero trust", aka everything is bad and only allows certain application in, and blacklisting assumes everything is good and only restricts necessary applications. Maintaining a whitlist generally has less overhead as a sysadmin will only need to specify what is allowed and not constantly update a "blacklist".
+
+[`Applocker`](https://docs.microsoft.com/en-us/windows/security/threat-protection/windows-defender-application-control/applocker/applocker-overview) is Miscrosoft's whitelisting solution. It gives granular controle over executables, scripts, Windows installer files, DLLS, packaged apps and packed app installers.
+
+Rules can be applied to publisher's name, product name, file name, and version, also file paths, hashes, and security group or individual users. Can also be deployed in audit mode to first test the impact before enforcing all rules.
+
+#### Local Group Policy
+
+AS it says, is used to set, configure and adjust group policies, and in a domain environement, the group policies re pushed down from a `Domain Controller` onto all domain joined machines that `Group Policy objects` (GPOs) are linked to. They can then be tweaked by the `Local Group Policy`.
+
+open with `gpediy.msc`.
+
+Allows fine-tuned account auditing and configuring `AppLocker`.
+
+#### Windows Defender
+
+Defender comes with several features such as real-time protection, which protects the device from known threats in real-time and cloud-delivered protection, which works in conjunction with automatic sample submission to upload suspicious files for analysis. When files are submitted to the cloud protection service, they are "locked" to prevent any potentially malicious behavior until the analysis is complete. Another feature is Tamper Protection, which prevents security settings from being changed through the Registry, PowerShell cmdlets, or group policy.
+
+We ca use the Powershell command `Get-MpComputerStatus` to check which protection settings are enabled.
+
+`Windows Defender` is very good quality compared to even paid services, it's very effective when configured around core principles of config and patch management.
+
+It will catch payloads from common open-source frameworks such as Metasploit or Mimikatz.
