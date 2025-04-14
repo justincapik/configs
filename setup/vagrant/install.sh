@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -e  # Exit on most errors by default
 
+# Set Paris time
+echo "Europe/Paris" > /etc/timezone
+ln -sf /usr/share/zoneinfo/Europe/Paris /etc/localtime
+dpkg-reconfigure -f noninteractive tzdata
+
 # Update package lists
 sudo apt-get update
 
