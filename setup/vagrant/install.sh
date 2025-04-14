@@ -39,6 +39,12 @@ PACKAGES=(
 	freerdp3-x11
 	ncat
 	htop
+	webp
+	apt-transport-https
+	ca-certificates
+	software-properties-common
+	gnupg
+	lsb-release -y
 )
 
 # Install each package individually so we can continue if one fails
@@ -47,6 +53,18 @@ for pkg in "${PACKAGES[@]}"; do
 	# Use '|| true' to avoid failing the entire script if one package fails
 	sudo apt-get install -y "$pkg" || echo "WARNING: Failed to install $pkg. Continuing..."
 done
+
+# Add Docker's official GPG key:
+sudo apt-get update -y
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+# Add the repository to Apt sources:
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo "bookworm") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
 
 sudo apt autoremove -y
 
