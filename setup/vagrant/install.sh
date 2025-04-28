@@ -17,6 +17,17 @@ else
   sudo -u vagrant -H sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
 fi
 
+# Add Docker's official GPG key:
+sudo apt-get update -y
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+# Add the repository to Apt sources:
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+  $(. /etc/os-release && echo "bookworm") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
 # List of packages you want to install
 PACKAGES=(
 	nmap
@@ -49,8 +60,14 @@ PACKAGES=(
 	ca-certificates
 	software-properties-common
 	gnupg
-	lsb-release -y
+	lsb-release
+	sudo apt update
+	docker-ce
+	docker-ce-cli
+	containerd.io
 )
+
+sudo apt update
 
 # Install each package individually so we can continue if one fails
 for pkg in "${PACKAGES[@]}"; do
@@ -59,26 +76,16 @@ for pkg in "${PACKAGES[@]}"; do
 	sudo apt-get install -y "$pkg" || echo "WARNING: Failed to install $pkg. Continuing..."
 done
 
-# Add Docker's official GPG key:
-sudo apt-get update -y
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
-# Add the repository to Apt sources:
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-  $(. /etc/os-release && echo "bookworm") stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-sudo apt-get update
-
-# docker authorizations
-sudo usermod -aG docker $USER
-newgrp docker
-
 
 sudo apt autoremove -y
 
+# give docker group auth
+sudo usermod -aG docker $USER
+newgrp docker
 
+# enable docker at startup
+sudo systemctl enable docker
+sudo systemctl start docker
 
 #VS Code
 
