@@ -14,20 +14,9 @@ echo "INSTALLING autoremove"
 sudo apt autoremove -y
 echo "INSTALLING update"
 sudo apt-get update -y
-#echo "INSTALLING autoremove"
-#sudo apt upgrade -y
 echo "INSTALLING autoremove"
 sudo apt autoremove -y
 echo "FINISHED INSTALLING UPDATES"
-
-# install oh-my-zsh
-echo "Installing oh-my-zsh..."
-if [ -d /home/vagrant/.oh-my-zsh ]; then
-  echo "Oh My Zsh is already installed. Skipping installation."
-else
-  echo "Installing Oh My Zsh..."
-  sudo -u vagrant -H sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
-fi
 
 # Add Docker's official GPG key:
 sudo apt-get update -y
@@ -44,14 +33,6 @@ echo \
 
 sudo apt-get update -y
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-# give docker group auth
-#sudo usermod -aG docker $USER
-#newgrp docker
-
-# enable docker at startup
-#sudo systemctl enable docker
-#sudo systemctl start docker
 
 # List of packages you want to install
 PACKAGES=(
