@@ -34,6 +34,10 @@ echo \
 sudo apt-get update -y
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
+# adding vagrant user to docker group (give user permission to use docker)
+sudo gpasswd -a vagrant docker
+
+
 # List of packages you want to install
 PACKAGES=(
 	nmap
