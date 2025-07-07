@@ -1,0 +1,108 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+  # Windows 10 base box - you'll need to use a legitimate Windows 10 box
+  # Popular options include:
+  # - "gusztavvargadr/windows-10" (community maintained)
+  # - "Microsoft/EdgeOnWindows10" (Microsoft provided, but may be outdated)
+  config.vm.box = "gusztavvargadr/windows-10"
+  
+  # VM configuration
+  config.vm.hostname = "malware-analysis-win10"
+  
+  # Network configuration - isolated network for safety
+  config.vm.network "private_network", type: "dhcp"
+  
+  # Disable automatic box update checking
+  config.vm.box_check_update = false
+  
+  # Provider-specific configuration
+  config.vm.provider "virtualbox" do |vb|
+    # Display the VirtualBox GUI when booting the machine
+    vb.gui = true
+    
+    # Customize the amount of memory and CPUs
+    vb.memory = "4096"  # 4GB RAM minimum recommended
+    vb.cpus = 2
+    
+    # Enable nested virtualization if needed
+    vb.customize ["modifyvm", :id, "--nested-hw-virt", "on"]
+    
+    # Disable audio to reduce attack surface
+    vb.customize ["modifyvm", :id, "--audio", "none"]
+    
+    # Disable USB controller to reduce attack surface
+    vb.customize ["modifyvm", :id, "--usbehci", "off"]
+    vb.customize ["modifyvm", :id, "--usbxhci", "off"]
+    
+    # Set video memory
+    vb.customize ["modifyvm", :id, "--vram", "128"]
+    
+    # Enable 3D acceleration
+    vb.customize ["modifyvm", :id, "--accelerate3d", "on"]
+  end
+  
+  # Provisioning script to set up malware analysis environment
+  config.vm.provision "shell", inline: <<-SHELL
+    # Disable Windows Defender (for analysis purposes)
+    Set-MpPreference -DisableRealtimeMonitoring $true
+    Set-MpPreference -DisableIOAVProtection $true
+    Set-MpPreference -DisableScriptScanning $true
+    Set-MpPreference -DisableBehaviorMonitoring $true
+    Set-MpPreference -DisableBlockAtFirstSeen $true
+    Set-MpPreference -DisableEmailScanning $true
+    
+    # Disable Windows Update
+    Set-Service -Name "wuauserv" -StartupType Disabled
+    Stop-Service -Name "wuauserv"
+    
+    # Disable Windows Firewall
+    Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+    
+    # Enable file extensions view
+    Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced" -Name "HideFileExt" -Value 0
+    
+    # Enable hidden files view
+    Set-ItemProperty -Path "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced" -Name "Hidden" -Value 1
+    
+    # Disable UAC
+    Set-ItemProperty -Path "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" -Name "EnableLUA" -Value 0
+    
+    # Create analysis directories
+    New-Item -ItemType Directory -Force -Path "C:\\Analysis"
+    New-Item -ItemType Directory -Force -Path "C:\\Analysis\\Samples"
+    New-Item -ItemType Directory -Force -Path "C:\\Analysis\\Tools"
+    New-Item -ItemType Directory -Force -Path "C:\\Analysis\\Reports"
+    
+    Write-Host "Basic malware analysis environment configured."
+    Write-Host "Remember to install your analysis tools manually or via additional provisioning."
+  SHELL
+  
+  # Optional: Install Chocolatey and common analysis tools
+  config.vm.provision "shell", inline: <<-SHELL
+    # Install Chocolatey
+    Set-ExecutionPolicy Bypass -Scope Process -Force
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+    iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+    
+    # Install common analysis tools via Chocolatey
+    choco install -y notepadplusplus
+    choco install -y 7zip
+    choco install -y wireshark
+    choco install -y procexp
+    choco install -y procmon
+    choco install -y autoruns
+    choco install -y sysinternals
+    choco install -y python3
+    choco install -y git
+    choco install -y vscode
+    
+    Write-Host "Analysis tools installed via Chocolatey."
+  SHELL
+  
+  # Create snapshots for easy restoration
+  config.vm.provision "shell", inline: <<-SHELL
+    Write-Host "VM setup complete. Consider creating a snapshot now for easy restoration."
+  SHELL
+end
