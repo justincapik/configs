@@ -1,1 +1,3 @@
-setup/vagrant/.vagrant/
+setup/windows10/.vagrant
+setup/kali-linux/.vagrant
+setup/remnux/.vagrant

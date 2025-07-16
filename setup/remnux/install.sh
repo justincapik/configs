@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 set -e  # Exit on most errors by default
 
-sudo wget https://archive.kali.org/archive-keyring.gpg -O /usr/share/keyrings/kali-archive-keyring.gpg
-
 # Set Paris time
 echo "Europe/Paris" > /etc/timezone
 ln -sf /usr/share/zoneinfo/Europe/Paris /etc/localtime
@@ -17,25 +15,6 @@ sudo apt-get update -y
 echo "INSTALLING autoremove"
 sudo apt autoremove -y
 echo "FINISHED INSTALLING UPDATES"
-
-# Add Docker's official GPG key:
-sudo apt-get update -y
-sudo apt-get install ca-certificates curl -y
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
-
-# Add the repository to Apt sources:
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-  $(. /etc/os-release && echo "bookworm") stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-sudo apt-get update -y
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-# adding vagrant user to docker group (give user permission to use docker)
-sudo gpasswd -a vagrant docker
 
 
 # List of packages you want to install
