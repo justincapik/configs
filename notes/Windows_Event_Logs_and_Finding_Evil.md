@@ -101,3 +101,4 @@ Download from official documentation:
 [https://docs.microsoft.com/en-us/sysinternals/downloads/sysmon](https://docs.microsoft.com/en-us/sysinternals/downloads/sysmon)
 
 ### Detection Example 1: Detecting DLL Hijacking
+
