@@ -149,4 +149,3 @@ The [MITRE ATT&CK](https://attack.mitre.org/) (Adversarial Tactics, Techniques, 
 
 - `Training and Education`: The comprehensive and well-organized nature of the ATT&CK framework makes it an exceptional resource for training and educating security professionals on the latest adversarial tactics and methods.
 
-f
