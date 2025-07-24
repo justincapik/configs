@@ -97,8 +97,41 @@ Example sysmon configs:
 - [https://github.com/SwiftOnSecurity/sysmon-config](https://github.com/SwiftOnSecurity/sysmon-config)
 - [https://github.com/olafhartong/sysmon-modular](https://github.com/olafhartong/sysmon-modular)
 
-Download from official documentation:
+Download Sysmon from official documentation:
 [https://docs.microsoft.com/en-us/sysinternals/downloads/sysmon](https://docs.microsoft.com/en-us/sysinternals/downloads/sysmon)
 
 ### Detection Example 1: Detecting DLL Hijacking
 
+We're going to study dll hacking based on [this link](https://www.wietzebeukema.nl/blog/hijacking-dlls-in-windows). 
+For our case we're going to turn on `Event ID 7: Image loaded` to check all dlls loaded. (cf [Sysmon Doc](https://learn.microsoft.com/en-us/sysinternals/downloads/sysmon))
+``` xml
+<!--- ... rule 7 ... --->
+<RuleGroup name="" groupRelation="or">
+    <ImageLoad onmatch="include">
+        <!--- ... --->
+    </ImageLoad>
+</RuleGroup>
+```
+To:
+``` xml
+<!--- ... rule 7 ... --->
+<RuleGroup name="" groupRelation="or">
+    <ImageLoad onmatch="exclude">
+        <!--- ... --->
+    </ImageLoad>
+</RuleGroup>
+```
+
+Turn on sysmon with:
+``` Powershell
+sysmon.exe -i -accepteula -h md5,sha256,imphash -l -n
+```
+
+Add config file:
+``` Powershell
+sysmon.exe -c filename.xml
+```
+
+To view the syslog events, navigate to the Event Viewer and access "Applications and Services" -> "Microsoft" -> "Windows" -> "Sysmon."
+
+Next we follow the dll hacking tutorial and copy 
