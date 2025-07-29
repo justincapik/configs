@@ -134,4 +134,17 @@ sysmon.exe -c filename.xml
 
 To view the syslog events, navigate to the Event Viewer and access "Applications and Services" -> "Microsoft" -> "Windows" -> "Sysmon."
 
-Next we follow the dll hacking tutorial and copy 
+Next we follow the dll hacking tutorial and copy Stephen Fewer's "hello world" [reflective DLL](https://github.com/stephenfewer/ReflectiveDLLInjection/tree/master/bin), rename `reflective_dll.x64.dll` to `WININET.dll` and move `calc.exe` to the same directory. Now when we start `calc.exe` we have a [MessageBox](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-messageboxa) with the text `"Welcome from DLLMain!"`.
+
+We can then find this in the event logs by focusing on `Event ID 7` with the `Filter Current Log..` option. The output from Sysmon gives us multiple valuabe insights.
+
+In this case here are the IOCs:
+
+- "calc.exe", originally located in System32, should not be found in a writable directory. Therefore, a copy of "calc.exe" in a writable directory serves as an IOC, as it should always reside in System32 or potentially Syswow64.
+
+- "WININET.dll", originally located in System32, should not be loaded outside of System32 by calc.exe. If instances of "WININET.dll" loading occur outside of System32 with "calc.exe" as the parent process, it indicates a DLL hijack within calc.exe. While caution is necessary when alerting on all instances of "WININET.dll" loading outside of System32 (as some applications may package specific DLL versions for stability), in the case of "calc.exe", we can confidently assert a hijack due to the DLL's unchanging name, which attackers cannot modify to evade detection.
+
+- The original "WININET.dll" is Microsoft-signed, while our injected DLL remains unsigned.
+
+### Detectio Example 2: Detecting Unmanaged Powershell/C-Sharp Injection
+
