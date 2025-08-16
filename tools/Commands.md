@@ -1,6 +1,6 @@
 # Threat Intel
 
-## website information
+## Website information
 
 ### crt.sh
 
