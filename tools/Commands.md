@@ -52,4 +52,8 @@ Launch it with `photorec` and choose a partition where our data is saved and mou
 Reveals all ascii strings of a file in grep-able format.
 
 
+# Misc
 
+## Atomic Red Team
+
+[Atomic Red Team](https://github.com/redcanaryco/atomic-red-team/tree/master) is an amazing tool sthat allwos to run exploit based on the [MITRE ATT&CK Framework](https://attack.mitre.org/) to test system response.
