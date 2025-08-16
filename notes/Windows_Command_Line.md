@@ -108,7 +108,7 @@ History commands:
 
 `Ctrl + C` to interrupt command.
 
-## System Navigation
+### System Navigation
 
 - `cd` and `chdir` work like the linux `cd` command.
 - `tree` command:
@@ -136,7 +136,7 @@ History commands:
     └───Videos
         └───Captures
     ```
-  - use `tree /F` to list files recursively.
+  - use `tree /F` to list files as well.
 
 #### Interesting directories
 |Name: | Location: | Description:|
@@ -147,13 +147,160 @@ History commands:
 |%ProgramFiles% | C:\Program Files | folder containing all 64-bit applications installed on the system. Useful for seeing what kind of applications are installed on the target system.|
 |%ProgramFiles(x86)% | C:\Program Files (x86) | Folder containing all 32-bit applications installed on the system. Useful for seeing what kind of applications are installed on the target system.|
 
-## Working with Directories and Files
+### Working with Directories and Files
 
+- `dir /s <drive:>\<pattern>` to search for files/directories
 - `md` or `mkdir` to create a new directory
 - `rd` or `rmdir` to delete an empty directory
-  - `rd /S` to force prompt to delete a directory
+  - `rd /S` to allow prompt to delete non-empty directory
 - `move <src> <dst>` to move directory
-- `xcopy <scr> <dst> <opts>` to copy a file, removes the read-only bit [deprecated for `robocopy`]
-  - use `/E` options to copy folder and subfolders, inclusing empty folders
+- `xcopy <scr> <dst> <opts>` to copy a file, **removes the read-only bit** [deprecated, use `robocopy`]
+  - use `/E` options to copy folder and subfolders, including empty folders
 
 #### Robocopy
+
+The heavy-duty rsync-style copying command of windows.
+
+`robocopy C:\source D:\destination`
+
+If given `SeBackupPrivilege` and `SeRestorePrivilege` we can use the `/B` option to copy any file in backup mode and have full rights over them.
+
+Robocopy can also work with system, read-only, and hidden files. As a user, this can be problematic if we do not have the `SeBackupPrivilege` and auditing privilege attributes.  This could stop us from duplicating or moving files and directories. There is a bit of a workaround, however. We can utilize the `/MIR` switch to permit ourselves to copy the files we need temporarily.
+
+When permission are unsufficient, utilizing the `/MIR` switch will complete the task for us. Be aware that it will mark the files as a system backup and hide them from view. We can clear the additional attributes if we add the `/A-:SH` switch to our command. Be careful of the `/MIR` switch, as it will mirror the destination directory to the source (aka delete existing destination files).
+
+### Files
+
+#### Viewing file content
+
+- `more` -> `less` command in linux
+  - Go up and down with `enter` or `space bar`
+  - `/S` to crunch blank space
+  - Pipe output to `more`: eg. `ipconfig /all | more`
+
+- `type` to simple print a file to the screen
+  - Doesn't lock file
+  - `type example-1.txt >> example-2.txt`, same as linux
+
+#### Creating and modifying files
+
+With `echo`
+```cmd
+C:\Users\htb\Desktop>echo Check out this text > demo.txt
+
+C:\Users\htb\Desktop>type demo.txt
+Check out this text
+
+C:\Users\htb\Desktop>echo More text for our demo file >> demo.txt
+
+C:\Users\htb\Desktop>type demo.txt
+Check out this text
+More text for our demo file
+```
+
+with `fsutil`:
+```cmd
+C:\Users\htb\Desktop>fsutil file createNew for-sure.txt 222
+File C:\Users\htb\Desktop\for-sure.txt is created
+
+C:\Users\htb\Desktop>echo " my super cool text file from fsutil "> for-sure.txt
+
+C:\Users\htb\Desktop>type for-sure.txt
+" my super cool text file from fsutil "
+```
+
+rename a file with `ren`:
+```
+ren demo.txt superdemo.txt
+```
+
+### Input/Output
+
+We can utilize the <, >, |, and & to send input and output from the console and files to where we need them. With > we can push the output of a command to a file.
+
+Append to a file:
+```
+C:\Users\htb\Documents> echo a b c d e > test.txt
+
+C:\Users\htb\Documents>type test.txt
+a b c d e
+
+C:\Users\htb\Documents>echo f g h i j k see how this works now? >> test.txt
+
+C:\Users\htb\Documents>type test.txt
+a b c d e
+f g h i j k see how this works now?
+```
+
+pass in a file to a command:
+```
+C:\Users\htb\Documents>find /i "see" < test.txt
+
+f g h i j k see how this works now?
+```
+
+pip output between commands:
+```
+C:\Users\htb\Documents>ipconfig /all | find /i "IPV4"
+
+   IPv4 Address. . . . . . . . . . . : 172.16.146.5(Preferred)
+```
+
+Run A then B:
+```
+C:\Users\htb\Documents>ping 8.8.8.8 & type test.txt
+
+Pinging 8.8.8.8 with 32 bytes of data:
+Reply from 8.8.8.8: bytes=32 time=22ms TTL=114
+Reply from 8.8.8.8: bytes=32 time=19ms TTL=114
+Reply from 8.8.8.8: bytes=32 time=17ms TTL=114
+Reply from 8.8.8.8: bytes=32 time=16ms TTL=114
+
+Ping statistics for 8.8.8.8:
+    Packets: Sent = 4, Received = 4, Lost = 0 (0% loss),
+Approximate round trip times in milli-seconds:
+    Minimum = 16ms, Maximum = 22ms, Average = 18ms
+a b c d e
+f g h i j k see how this works now?
+```
+Run A then B, only if A succeeds:
+```
+C:\Users\student\Documents>cd C:\Users\student\Documents\Backup && echo 'did this work' > yes.txt
+
+C:\Users\student\Documents\Backup>type yes.txt
+'did this work'
+```
+
+#### Deleting files
+
+Use `del` or `erase`:
+```
+del <file>
+erase <file>
+```
+
+use `del /A` to delete based on attributes (also works for listing with `dir`):
+```
+  /A            Selects files to delete based on attributes
+  attributes    R  Read-only files            S  System files
+                H  Hidden files               A  Files ready for archiving
+                I  Not content indexed Files  L  Reparse Points
+                O  Offline files              -  Prefix meaning not
+```
+
+Use `/F` to force deletion without confirmation prompt.
+
+#### Copying and moving files
+
+- `copy` -> cp in linux
+- `move` -> mv in linux
+
+## Gathering System Information
+
+![What to gather](./Windows_InformationTypesChart.webp)
+
+Type 	Description
+General System Information 	Contains information about the overall target system. Target system information includes but is not limited to the hostname of the machine, OS-specific details (name, version, configuration, etc.), and installed hotfixes/patches for the system.
+Networking Information 	Contains networking and connection information for the target system and system(s) to which the target is connected over the network. Examples of networking information include but are not limited to the following: host IP address, available network interfaces, accessible subnets, DNS server(s), known hosts, and network resources.
+Basic Domain Information 	Contains Active Directory information regarding the domain to which the target system is connected.
+User Information 	Contains information regarding local users and groups on the target system. This can typically be expanded to contain anything accessible to these accounts, such as environment variables, currently running tasks, scheduled tasks, and known services.
