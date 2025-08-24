@@ -57,3 +57,7 @@ Reveals all ascii strings of a file in grep-able format.
 ## Atomic Red Team
 
 [Atomic Red Team](https://github.com/redcanaryco/atomic-red-team/tree/master) is an amazing tool sthat allwos to run exploit based on the [MITRE ATT&CK Framework](https://attack.mitre.org/) to test system response.
+
+## Hack The box Lab walkthroughs
+
+[0xdf](https://0xdf.gitlab.io/tags.html#active-directory) is a very comprehensive walthrough of all if not most hackthebox labs categorized by exploit.
