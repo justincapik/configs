@@ -51,6 +51,13 @@ Launch it with `photorec` and choose a partition where our data is saved and mou
 
 Reveals all ascii strings of a file in grep-able format.
 
+# Red Teaming
+
+## Active Directory
+
+### Coercer 
+
+A [python script](https://github.com/p0dalirius/Coercer) to automatically coerce a Windows server to authenticate on an arbitrary machine through 12 methods
 
 # Misc
 

