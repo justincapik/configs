@@ -69,7 +69,7 @@ PACKAGES=(
 	apt-transport-https
 	gnupg
 	lsb-release
-	sudo apt update
+	gdb
 )
 
 sudo apt update -y
@@ -90,6 +90,10 @@ sudo apt autoremove -y
 # Import Microsoft GPG key and add the repository
 curl -sSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor | sudo tee /usr/share/keyrings/packages.microsoft.gpg > /dev/null
 echo "deb [arch=amd64 signed-by=/usr/share/keyrings/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" | sudo tee /etc/apt/sources.list.d/vscode.list
+
+## Install GEF for gdb
+wget -O /home/vagrant/.gdbinit-gef.py -q https://gef.blah.cat/py
+echo source /home/vagrant/.gdbinit-gef.py >> /home/vagrant/.gdbinit
 
 # Update and install VSCode
 sudo apt-get update -y
